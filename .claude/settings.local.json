@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /e/adib/adib_acadmey -maxdepth 3 -not -path */node_modules/* -not -path */.next/* -not -path */.git/* -type d)",
+      "Bash(cat:*)",
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)",
+      "Bash(mkdir -p \"E:/adib/adib_acadmey/app/manager/students/[id]\")",
+      "Bash(mkdir -p \"E:/adib/adib_acadmey/app/general-manager/students/[id]\")"
+    ]
+  }
+}

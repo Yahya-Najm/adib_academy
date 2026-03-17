@@ -14,27 +14,183 @@ enum Role {
   STAFF
 }
 
+enum PaymentType {
+  MONTHLY_SALARY      // Managers and Staff
+  PER_CLASS           // Teachers — fixed rate per class taught
+  REVENUE_PERCENTAGE  // Teachers — percentage of student fees per class
+}
+
+enum ClassStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum EducationLevel {
+  BELOW_GRADE_6
+  GRADE_6_AND_ABOVE
+  SCHOOL_GRADUATE
+  BACHELOR
+  MASTERS
+  OTHER
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  DROPPED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
 model Branch {
-  id        String   @id @default(cuid())
-  name      String
-  address   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  users     User[]
+  id              String           @id @default(cuid())
+  name            String
+  address         String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  users           User[]
+  students        Student[]
+  courseTemplates CourseTemplate[]
+  courseClasses   CourseClass[]
+}
+
+/// A course template defined by the General Manager
+/// branchId = null means it applies to all branches
+model CourseTemplate {
+  id             String        @id @default(cuid())
+  name           String
+  branchId       String?
+  branch         Branch?       @relation(fields: [branchId], references: [id])
+  monthlyFee     Float
+  durationMonths Int
+  numSections    Int           @default(1)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  courseClasses  CourseClass[]
+}
+
+/// A running class instance started by a manager
+model CourseClass {
+  id               String             @id @default(cuid())
+  courseTemplateId String
+  courseTemplate   CourseTemplate     @relation(fields: [courseTemplateId], references: [id])
+  branchId         String
+  branch           Branch             @relation(fields: [branchId], references: [id])
+  managerId        String
+  manager          User               @relation("ManagedClasses", fields: [managerId], references: [id])
+  startDate        DateTime
+  classTime        String             // "09:00"
+  offDays          String[]           // ["Friday", "Saturday"] — weekly recurring off days
+  status           ClassStatus        @default(ACTIVE)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  sections         ClassSection[]
+  exams            Exam[]
+  courseEnrollments CourseEnrollment[]
+}
+
+/// One section of a CourseClass, taught by a single teacher
+model ClassSection {
+  id            String      @id @default(cuid())
+  courseClassId String
+  courseClass   CourseClass @relation(fields: [courseClassId], references: [id], onDelete: Cascade)
+  sectionNumber Int
+  sectionName   String?     // e.g. "Book", "Grammar", "Computer"
+  teacherId     String
+  teacher       User        @relation("TeachingSections", fields: [teacherId], references: [id])
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([courseClassId, sectionNumber])
+}
+
+/// An exam for a CourseClass
+model Exam {
+  id            String      @id @default(cuid())
+  courseClassId String
+  courseClass   CourseClass @relation(fields: [courseClassId], references: [id], onDelete: Cascade)
+  title         String
+  date          DateTime
+  description   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 }
 
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role
-  /// For STAFF role only — e.g. "CLEANER", "COOK", "SECURITY"
-  staffType String?
-  active    Boolean  @default(true)
-  branchId  String?
-  branch    Branch?  @relation(fields: [branchId], references: [id])
-  createdBy String?  // ID of the General Manager who created this user
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String           @id @default(cuid())
+  name              String
+  email             String?          @unique
+  password          String
+  role              Role
+  /// For STAFF role only — e.g. "Cleaner", "Cook", "Security"
+  staffType         String?
+  active            Boolean          @default(true)
+  branchId          String?
+  branch            Branch?          @relation(fields: [branchId], references: [id])
+  createdBy         String?
+  // Payment
+  paymentType       PaymentType?
+  monthlySalary     Float?           // For MONTHLY_SALARY
+  perClassRate      Float?           // For PER_CLASS teachers
+  revenuePercentage Float?           // For REVENUE_PERCENTAGE teachers
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  // Relations
+  managedClasses    CourseClass[]    @relation("ManagedClasses")
+  teachingSections  ClassSection[]   @relation("TeachingSections")
+  createdStudents   Student[]        @relation("CreatedStudents")
+}
+
+model Student {
+  id           String             @id @default(cuid())
+  firstName    String
+  lastName     String
+  age          Int
+  phone        String?
+  email        String?            @unique
+  education    EducationLevel
+  address      String?
+  parentPhone1 String?
+  parentPhone2 String?
+  active       Boolean            @default(true)
+  branchId     String?
+  branch       Branch?            @relation(fields: [branchId], references: [id])
+  createdById  String?
+  createdBy    User?              @relation("CreatedStudents", fields: [createdById], references: [id])
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  enrollments  CourseEnrollment[]
+}
+
+/// A student enrolled in a CourseClass
+model CourseEnrollment {
+  id              String           @id @default(cuid())
+  studentId       String
+  student         Student          @relation(fields: [studentId], references: [id])
+  courseClassId   String
+  courseClass     CourseClass      @relation(fields: [courseClassId], references: [id])
+  enrolledAt      DateTime         @default(now())
+  status          EnrollmentStatus @default(ACTIVE)
+  monthlyPayments MonthlyPayment[]
+
+  @@unique([studentId, courseClassId])
+}
+
+/// Monthly payment record for a CourseEnrollment
+model MonthlyPayment {
+  id           String           @id @default(cuid())
+  enrollmentId String
+  enrollment   CourseEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  monthNumber  Int              // 1-based: month 1, 2, 3...
+  amount       Float
+  dueDate      DateTime
+  paidAt       DateTime?
+  status       PaymentStatus    @default(PENDING)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 }

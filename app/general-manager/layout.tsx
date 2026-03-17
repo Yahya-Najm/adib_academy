@@ -6,6 +6,8 @@ const nav = [
   { label: "Managers", href: "/general-manager/managers" },
   { label: "Teachers", href: "/general-manager/teachers" },
   { label: "Staff", href: "/general-manager/staff" },
+  { label: "Course Templates", href: "/general-manager/course-templates" },
+  { label: "Students", href: "/general-manager/students" },
 ];
 
 export default function GeneralManagerLayout({ children }: { children: React.ReactNode }) {

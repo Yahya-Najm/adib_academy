@@ -7,12 +7,16 @@ export const authConfig = {
   },
   callbacks: {
     jwt({ token, user }) {
-      if (user) token.role = (user as { role: string }).role;
+      if (user) {
+        token.role = (user as { role: string }).role;
+        token.branchId = (user as { branchId?: string | null }).branchId ?? null;
+      }
       return token;
     },
     session({ session, token }) {
       session.user.id = token.sub as string;
       session.user.role = token.role as string;
+      session.user.branchId = (token.branchId ?? null) as string | null;
       return session;
     },
     authorized({ auth, request: { nextUrl } }) {
