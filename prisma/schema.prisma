@@ -1,0 +1,40 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  GENERAL_MANAGER
+  MANAGER
+  TEACHER
+  STAFF
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role
+  /// For STAFF role only — e.g. "CLEANER", "COOK", "SECURITY"
+  staffType String?
+  active    Boolean  @default(true)
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  createdBy String?  // ID of the General Manager who created this user
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

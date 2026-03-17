@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: adib_academy_db
+    environment:
+      POSTGRES_USER: adib_user
+      POSTGRES_PASSWORD: strongpassword123
+      POSTGRES_DB: adib_academy
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
