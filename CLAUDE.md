@@ -12,6 +12,7 @@ npm run dev
 docker compose up -d          # start Postgres on port 5433
 npm run db:generate            # regenerate Prisma client
 npm run db:push                # push schema to DB (dev only)
+npm run db:push --accept-data-loss  # when adding unique constraints to existing data
 npm run db:studio              # open Prisma Studio
 
 # Build / lint
@@ -26,14 +27,20 @@ npm run lint
 - **Prisma 7** + **PostgreSQL** (Docker on port 5433)
 - **Auth.js v5** (`next-auth@beta`) — credentials-based, JWT sessions
 
+## Seed / Dev credentials
+
+Run `npx prisma db seed` to create the GM account:
+- Email: `gm@adibacademy.com` / Password: `admin123`
+
 ## Architecture
 
 ### Auth flow
 - `auth.ts` — NextAuth config (credentials provider, jwt/session callbacks)
-- `middleware.ts` — protects `/general-manager`, `/manager`, `/teacher` routes; enforces role-based access
+- `auth.config.ts` — edge-compatible config used by the proxy; contains the `authorized` callback for role-based route protection
+- `proxy.ts` — **Next.js 16 uses `proxy.ts`, not `middleware.ts`**; protects `/general-manager`, `/manager`, `/teacher` routes
 - `app/login/page.tsx` → on success → `app/dashboard/page.tsx` → redirects by role
 - `components/Providers.tsx` — wraps root layout with `SessionProvider`
-- `types/next-auth.d.ts` — extends `Session` and `JWT` with `role` and `id`
+- `types/next-auth.d.ts` — extends `Session` and `JWT` with `role`, `id`, `branchId`
 
 ### Dashboard layout system
 Each role has its own directory with a `layout.tsx` that feeds nav items into the shared
@@ -47,12 +54,95 @@ app/
 └── teacher/           layout.tsx (dark accent)   + subpages
 ```
 
+### Server actions pattern
+All mutations and data fetches happen in `actions/` folders co-located with each role's directory.
+Every action calls a `guard.ts` helper first (`requireGM()` / `requireManager()` / `requireTeacher()`),
+which calls `auth()` and throws `"Unauthorized"` if the role doesn't match.
+Server action files are marked `"use server"` at the top.
+
+### Data model — key relationships
+
+```
+Branch
+├── CourseTemplate (branchId=null means global/all-branches)
+│   └── CourseClass  (created by a Manager; scoped to one Branch)
+│       ├── ClassSection[]  (one per template.numSections; each has one Teacher)
+│       │   └── TeacherAttendance[]  (per section per date; has isLate)
+│       ├── ClassHoliday[]  (manager-set one-off holidays for this class)
+│       ├── Exam[]
+│       │   └── ExamScore[]  (@@unique on [examId, studentId])
+│       ├── StudentAttendance[]  (has isLate)
+│       └── CourseEnrollment[]  (per Student)
+│           └── MonthlyPayment[]  (one per month × durationMonths)
+├── Product[]
+│   └── ProductSale[]
+├── Transaction[]
+├── OfficialHoliday[]  (branchId=null means applies to all branches)
+├── WeeklyHoliday[]    (branchId=null means applies to all branches; recurring by dayOfWeek)
+├── StaffAttendance[]  (daily present/absent/late for STAFF role users)
+├── AttendanceReport[] (auto + manual reports for STAFF/TEACHER/STUDENT/CLASS)
+└── AttendanceFinalization[]  (@@unique on [date, branchId] — locks a day)
+```
+
+- A **Manager** can only see/edit records where `branchId = session.user.branchId`.
+- **GM** sees all branches.
+- A **CourseTemplate** defines `numSections` — when a Manager creates a class, they must assign exactly that many `ClassSection` rows with a teacher each.
+- **Students** are branch-scoped, have an auto-generated `studentId` (e.g. `ali-hassan-3f2a`), and link to enrollments which generate `MonthlyPayment` rows.
+
+### MonthlyPayment fields
+- `status`: `PENDING | PAID | PARTIAL | OVERDUE`
+- `paidAmount`: running total of all installments collected for this month (accumulates across multiple `recordPayment` calls)
+- `feesRefId`: **required** receipt/reference string on every payment — used for finance summaries
+- `discounted`: boolean flag for "time passed discount" — forces `PAID` status regardless of `paidAmount`; allows $0 new installment
+- `fromDate`: set on month 1 only, for mid-month join tracking
+
+### recordPayment logic
+`recordPayment(paymentId, { amount, feesRefId, discounted?, paidAt? })`:
+- `amount` = the installment being paid **now** (not the total)
+- `newTotal = payment.paidAmount + amount`
+- Cap enforced for all cases: `newTotal > payment.amount` → error
+- `discounted=true` → saves `newTotal`, forces `status=PAID` (allows `amount=0` to discount remaining balance)
+- Otherwise: `PAID` if `newTotal >= payment.amount`, else `PARTIAL`
+
+### Attendance system
+
+**Holiday hierarchy** — checked in this order before allowing attendance writes:
+1. `WeeklyHoliday` — GM-set recurring day (e.g. every Friday), global or per branch
+2. `OfficialHoliday` — GM-set one-off date, global or per branch
+3. `CourseClass.offDays[]` — manager-set recurring weekday for a specific class (student/teacher tabs only)
+4. `ClassHoliday` — manager-set one-off date for a specific class with a reason
+
+All four sources display as `"Holiday — [reason]"` instead of present/absent toggles. Server actions validate and throw on blocked dates.
+
+**AttendanceFinalization** — once a manager calls `finalizeDay(date)`, a `@@unique([date, branchId])` row is created and all attendance writes for that date+branch are blocked. Reports remain addable after finalization.
+
+**AttendanceReport** fields:
+- `subjectType`: `"STAFF" | "TEACHER" | "STUDENT" | "CLASS"`
+- `subjectId`: userId for STAFF/TEACHER, studentId for STUDENT, courseClassId for CLASS
+- `isAutomatic`: true = auto-created when marking Absent or Late (cleaned up if toggled back)
+- `reportType`: `"ABSENT"` | `"LATE"` for auto; free-text category for manual
+- `content`: optional for auto, required for manual
+
+**Attendance pages** live at `/manager/attendance/{staff,teachers,students}`. Each loads context via a single server action (`getStaffAttendanceContext`, `getTeacherAttendanceContext`, `getStudentAttendanceContext`) that returns staff/classes, existing records, reports (with `manager` relation included), holiday label, and finalization status for the selected date.
+
+**Teacher attendance** is per `ClassSection` (not per teacher per day) — a teacher teaching 3 sections has 3 independent attendance rows on a given day.
+
+### Reports
+- Written from `/manager/reports` (standalone) or inline from attendance pages via `ReportPanel` component (`app/manager/attendance/components/ReportPanel.tsx`)
+- `components/reports/ReportsSection.tsx` — shared read-only display used in student/user profile pages
+- Report counts surface on the Manager dashboard (branch-scoped) and GM dashboard (all branches, with per-branch breakdown)
+- Reports appear in: student profile (`/manager/students/[id]`, `/general-manager/students/[id]`); staff/teacher profile pages (when built); class detail page
+
 ### User model
 Roles: `GENERAL_MANAGER | MANAGER | TEACHER | STAFF`
 `STAFF` users (cleaner, cook, etc.) have a `staffType` string and no dashboard.
 The General Manager creates all users and sets their passwords (`bcryptjs` hashed).
 
+Teacher payment types: `PER_CLASS` (fixed rate) or `REVENUE_PERCENTAGE` (% of student fees).
+Manager/Staff payment type: `MONTHLY_SALARY`.
+
 ### Design conventions
 - White background (`bg-white`) for all pages; `bg-gray-50` for page content area
 - Dark/gray only for accents and active states
 - Accent colors: orange (GM), teal (Manager), gray (Teacher)
+- Status badge colors: green=PAID, yellow=PENDING, red=OVERDUE, orange=PARTIAL

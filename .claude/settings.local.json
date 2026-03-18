@@ -6,7 +6,12 @@
       "Bash(npm run:*)",
       "Bash(npx tsc:*)",
       "Bash(mkdir -p \"E:/adib/adib_acadmey/app/manager/students/[id]\")",
-      "Bash(mkdir -p \"E:/adib/adib_acadmey/app/general-manager/students/[id]\")"
+      "Bash(mkdir -p \"E:/adib/adib_acadmey/app/general-manager/students/[id]\")",
+      "Bash(xargs grep:*)",
+      "Bash(ls /e/adib/adib_acadmey/app/manager/students/[id])",
+      "Bash(ls /e/adib/adib_acadmey/app/manager/classes/[id])",
+      "Bash(npx prisma:*)",
+      "Bash(rm:*)"
     ]
   }
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { ClassStatus } from "@prisma/client";
 import { deleteClass } from "../actions/classes";
 import ExamsPanel from "./ExamsPanel";
@@ -165,8 +166,13 @@ export default function ClassesTable({ classes, onEdit, onRefresh }: Props) {
                 </td>
                 <td className="px-5 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <button onClick={() => onEdit(c)}
+                    <Link href={`/manager/classes/${c.id}`}
                       className="text-xs text-teal-600 hover:text-teal-700 font-medium px-2 py-1 rounded hover:bg-teal-50 transition-colors"
+                    >
+                      View
+                    </Link>
+                    <button onClick={() => onEdit(c)}
+                      className="text-xs text-gray-600 hover:text-gray-700 font-medium px-2 py-1 rounded hover:bg-gray-100 transition-colors"
                     >
                       Edit
                     </button>

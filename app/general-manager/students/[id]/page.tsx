@@ -4,9 +4,12 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getStudentGM } from "../../actions/students";
+import { getReportsForSubjectGM } from "../../actions/reports";
+import ReportsSection from "@/components/reports/ReportsSection";
 import { EducationLevel } from "@prisma/client";
 
 type Student = Awaited<ReturnType<typeof getStudentGM>>;
+type StudentReport = Awaited<ReturnType<typeof getReportsForSubjectGM>>[number];
 
 const EDU_LABELS: Record<EducationLevel, string> = {
   BELOW_GRADE_6: "Below Grade 6",
@@ -43,9 +46,11 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
 export default function GMStudentProfilePage() {
   const { id } = useParams<{ id: string }>();
   const [student, setStudent] = useState<Student | null>(null);
+  const [reports, setReports] = useState<StudentReport[]>([]);
 
   useEffect(() => {
     getStudentGM(id).then(setStudent);
+    getReportsForSubjectGM("STUDENT", id).then(setReports).catch(() => {});
   }, [id]);
 
   if (!student) return <div className="p-8 text-gray-400">Loading...</div>;
@@ -134,6 +139,12 @@ export default function GMStudentProfilePage() {
           Not enrolled in any classes
         </div>
       )}
+
+      {/* Reports */}
+      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mt-6">
+        <h2 className="text-base font-semibold text-gray-800 mb-4">Reports</h2>
+        <ReportsSection reports={reports as Parameters<typeof ReportsSection>[0]["reports"]} />
+      </div>
     </div>
   );
 }

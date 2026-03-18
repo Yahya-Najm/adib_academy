@@ -8,6 +8,8 @@ const nav = [
   { label: "Staff", href: "/general-manager/staff" },
   { label: "Course Templates", href: "/general-manager/course-templates" },
   { label: "Students", href: "/general-manager/students" },
+  { label: "Products", href: "/general-manager/products" },
+  { label: "Holidays", href: "/general-manager/holidays" },
 ];
 
 export default function GeneralManagerLayout({ children }: { children: React.ReactNode }) {

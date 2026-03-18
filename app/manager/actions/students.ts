@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireManager } from "./guard";
 import { EducationLevel } from "@prisma/client";
+import { randomBytes } from "crypto";
 
 async function getManagerInfo() {
   const session = await requireManager();
@@ -20,6 +21,7 @@ export async function getStudents(search?: string) {
           { lastName: { contains: search, mode: "insensitive" } },
           { phone: { contains: search, mode: "insensitive" } },
           { email: { contains: search, mode: "insensitive" } },
+          { studentId: { contains: search, mode: "insensitive" } },
         ],
       } : {}),
     },
@@ -27,6 +29,7 @@ export async function getStudents(search?: string) {
     select: {
       id: true, firstName: true, lastName: true, age: true,
       phone: true, email: true, education: true, active: true,
+      studentId: true,
       enrollments: {
         where: { status: "ACTIVE" },
         select: { courseClass: { select: { courseTemplate: { select: { name: true } } } } },
@@ -58,6 +61,17 @@ export async function getStudent(id: string) {
   return student;
 }
 
+async function generateStudentId(firstName: string, lastName: string): Promise<string> {
+  const base = `${firstName.toLowerCase().trim()}-${lastName.toLowerCase().trim()}`;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const suffix = randomBytes(2).toString("hex");
+    const candidate = `${base}-${suffix}`;
+    const existing = await prisma.student.findUnique({ where: { studentId: candidate } });
+    if (!existing) return candidate;
+  }
+  throw new Error("Failed to generate unique student ID");
+}
+
 export async function createStudent(data: {
   firstName: string;
   lastName: string;
@@ -73,8 +87,11 @@ export async function createStudent(data: {
   if (!branchId) throw new Error("Your account has no branch assigned");
   if (!data.firstName.trim() || !data.lastName.trim()) throw new Error("First and last name are required");
 
+  const studentId = await generateStudentId(data.firstName, data.lastName);
+
   return prisma.student.create({
     data: {
+      studentId,
       firstName: data.firstName.trim(),
       lastName: data.lastName.trim(),
       age: data.age,
@@ -123,6 +140,20 @@ export async function updateStudent(id: string, data: {
   });
 }
 
+export async function updateStudentId(id: string, newStudentId: string) {
+  const { branchId } = await getManagerInfo();
+  const existing = await prisma.student.findUnique({ where: { id } });
+  if (!existing || existing.branchId !== branchId) throw new Error("Student not found");
+
+  const trimmed = newStudentId.trim();
+  if (!trimmed) throw new Error("Student ID cannot be empty");
+
+  const conflict = await prisma.student.findUnique({ where: { studentId: trimmed } });
+  if (conflict && conflict.id !== id) throw new Error("This student ID is already taken");
+
+  return prisma.student.update({ where: { id }, data: { studentId: trimmed } });
+}
+
 export async function getClassesForEnrollment() {
   const { branchId } = await getManagerInfo();
   return prisma.courseClass.findMany({
@@ -134,21 +165,18 @@ export async function getClassesForEnrollment() {
   });
 }
 
-export async function enrollStudent(studentId: string, courseClassId: string) {
+export async function enrollStudent(studentId: string, courseClassId: string, fromDate?: string) {
   const { branchId } = await getManagerInfo();
 
-  // Verify student belongs to this branch
   const student = await prisma.student.findUnique({ where: { id: studentId } });
   if (!student || student.branchId !== branchId) throw new Error("Student not found");
 
-  // Verify class belongs to this branch
   const courseClass = await prisma.courseClass.findUnique({
     where: { id: courseClassId },
     include: { courseTemplate: true },
   });
   if (!courseClass || courseClass.branchId !== branchId) throw new Error("Class not found");
 
-  // Check not already enrolled
   const existing = await prisma.courseEnrollment.findUnique({
     where: { studentId_courseClassId: { studentId, courseClassId } },
   });
@@ -157,7 +185,6 @@ export async function enrollStudent(studentId: string, courseClassId: string) {
   const { monthlyFee, durationMonths } = courseClass.courseTemplate;
   const startDate = courseClass.startDate;
 
-  // Create enrollment + monthly payments
   return prisma.courseEnrollment.create({
     data: {
       studentId,
@@ -171,6 +198,7 @@ export async function enrollStudent(studentId: string, courseClassId: string) {
             amount: monthlyFee,
             dueDate,
             status: "PENDING" as const,
+            ...(i === 0 && fromDate ? { fromDate: new Date(fromDate) } : {}),
           };
         }),
       },
@@ -178,16 +206,45 @@ export async function enrollStudent(studentId: string, courseClassId: string) {
   });
 }
 
-export async function markPaymentPaid(paymentId: string) {
+export async function recordPayment(
+  paymentId: string,
+  opts: {
+    amount: number;       // installment being paid now
+    feesRefId: string;    // required
+    discounted?: boolean;
+    paidAt?: string;      // ISO date string; undefined = now
+  }
+) {
   const { branchId } = await getManagerInfo();
   const payment = await prisma.monthlyPayment.findUnique({
     where: { id: paymentId },
     include: { enrollment: { include: { student: true } } },
   });
-  if (!payment || payment.enrollment.student.branchId !== branchId) throw new Error("Payment not found");
+  if (!payment || payment.enrollment.student.branchId !== branchId)
+    throw new Error("Payment not found");
+
+  if (!opts.feesRefId?.trim()) throw new Error("Fees reference ID is required");
+  if (!opts.discounted && opts.amount <= 0) throw new Error("Amount must be greater than 0");
+
+  const existing = payment.paidAmount ?? 0;
+  const newTotal = existing + opts.amount;
+
+  if (newTotal > payment.amount)
+    throw new Error(
+      `Amount exceeds monthly fee. Remaining: $${(payment.amount - existing).toFixed(2)}`
+    );
+
+  const paidAt = opts.paidAt ? new Date(opts.paidAt) : new Date();
+  const status = opts.discounted || newTotal >= payment.amount ? "PAID" : "PARTIAL";
 
   return prisma.monthlyPayment.update({
     where: { id: paymentId },
-    data: { status: "PAID", paidAt: new Date() },
+    data: {
+      paidAmount: newTotal,
+      feesRefId: opts.feesRefId.trim(),
+      discounted: opts.discounted ?? false,
+      paidAt,
+      status,
+    },
   });
 }

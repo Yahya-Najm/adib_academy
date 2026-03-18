@@ -4,13 +4,17 @@ import { useEffect, useState, useTransition } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
-  getStudent, updateStudent, getClassesForEnrollment,
-  enrollStudent, markPaymentPaid,
+  getStudent, updateStudent, updateStudentId, getClassesForEnrollment,
+  enrollStudent, recordPayment,
 } from "../../actions/students";
+import { getReportsForSubject } from "../../actions/reports";
+import ReportsSection from "@/components/reports/ReportsSection";
 import { EducationLevel } from "@prisma/client";
 
 type Student = Awaited<ReturnType<typeof getStudent>>;
 type Classes = Awaited<ReturnType<typeof getClassesForEnrollment>>;
+type Payment = Student["enrollments"][number]["monthlyPayments"][number];
+type StudentReport = Awaited<ReturnType<typeof getReportsForSubject>>[number];
 
 const EDU_LABELS: Record<EducationLevel, string> = {
   BELOW_GRADE_6: "Below Grade 6",
@@ -25,6 +29,7 @@ const STATUS_COLORS: Record<string, string> = {
   PAID: "bg-green-100 text-green-700",
   PENDING: "bg-yellow-100 text-yellow-700",
   OVERDUE: "bg-red-100 text-red-700",
+  PARTIAL: "bg-orange-100 text-orange-700",
 };
 
 function currentMonth(startDate: Date | string, durationMonths: number) {
@@ -33,6 +38,10 @@ function currentMonth(startDate: Date | string, durationMonths: number) {
   const diffMs = now.getTime() - start.getTime();
   const diffMonths = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30));
   return Math.min(Math.max(diffMonths + 1, 1), durationMonths);
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export default function StudentProfilePage() {
@@ -45,10 +54,20 @@ export default function StudentProfilePage() {
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
+  // Student ID inline edit
+  const [editingStudentId, setEditingStudentId] = useState(false);
+  const [studentIdInput, setStudentIdInput] = useState("");
+
+  // Payment modal state
+  const [paymentModal, setPaymentModal] = useState<Payment | null>(null);
+  const [payForm, setPayForm] = useState({ paidAmount: "", feesRefId: "", discounted: false, paidAt: today() });
+  const [studentReports, setStudentReports] = useState<StudentReport[]>([]);
+
   async function load() {
-    const [s, c] = await Promise.all([getStudent(id), getClassesForEnrollment()]);
+    const [s, c, reports] = await Promise.all([getStudent(id), getClassesForEnrollment(), getReportsForSubject("STUDENT", id)]);
     setStudent(s);
     setClasses(c);
+    setStudentReports(reports);
     setForm({
       firstName: s.firstName, lastName: s.lastName, age: String(s.age),
       phone: s.phone ?? "", email: s.email ?? "", education: s.education,
@@ -78,6 +97,19 @@ export default function StudentProfilePage() {
     });
   }
 
+  function handleSaveStudentId() {
+    setError("");
+    startTransition(async () => {
+      try {
+        await updateStudentId(id, studentIdInput);
+        setEditingStudentId(false);
+        load();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to update student ID");
+      }
+    });
+  }
+
   function handleEnroll() {
     if (!enrollClassId) return;
     setError("");
@@ -92,13 +124,31 @@ export default function StudentProfilePage() {
     });
   }
 
-  function handleMarkPaid(paymentId: string) {
+  function openPaymentModal(p: Payment) {
+    setPaymentModal(p);
+    const remaining = p.amount - (p.paidAmount ?? 0);
+    setPayForm({ paidAmount: String(remaining), feesRefId: "", discounted: false, paidAt: today() });
+  }
+
+  function handleRecordPayment() {
+    if (!paymentModal) return;
+    const amount = parseFloat(payForm.paidAmount) || 0;
+    if (!payForm.discounted && amount <= 0) { setError("Enter a valid amount"); return; }
+    if (isNaN(amount) || amount < 0) { setError("Enter a valid amount"); return; }
+    if (!payForm.feesRefId.trim()) { setError("Fees reference ID is required"); return; }
+    setError("");
     startTransition(async () => {
       try {
-        await markPaymentPaid(paymentId);
+        await recordPayment(paymentModal.id, {
+          amount,
+          feesRefId: payForm.feesRefId,
+          discounted: payForm.discounted,
+          paidAt: payForm.paidAt || undefined,
+        });
+        setPaymentModal(null);
         load();
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to mark paid");
+        setError(err instanceof Error ? err.message : "Failed to record payment");
       }
     });
   }
@@ -135,6 +185,71 @@ export default function StudentProfilePage() {
 
       {error && <p className="text-red-600 text-sm mb-4 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
 
+      {/* Payment modal */}
+      {paymentModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 shadow-xl max-w-sm w-full mx-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Record Payment — Month {paymentModal.monthNumber}</h3>
+            <p className="text-xs text-gray-400 mb-4">
+              Total: ${paymentModal.amount} · Paid so far: ${paymentModal.paidAmount ?? 0} · Remaining: ${(paymentModal.amount - (paymentModal.paidAmount ?? 0)).toFixed(2)}
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Amount being paid now *</label>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={payForm.paidAmount}
+                  onChange={e => setPayForm(f => ({ ...f, paidAmount: e.target.value }))}
+                  className="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Fees Reference ID *</label>
+                <input
+                  type="text"
+                  value={payForm.feesRefId}
+                  onChange={e => setPayForm(f => ({ ...f, feesRefId: e.target.value }))}
+                  placeholder="Receipt / reference number"
+                  className="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Payment Date</label>
+                <input
+                  type="date"
+                  value={payForm.paidAt}
+                  onChange={e => setPayForm(f => ({ ...f, paidAt: e.target.value }))}
+                  className="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={payForm.discounted}
+                  onChange={e => setPayForm(f => ({ ...f, discounted: e.target.checked }))}
+                  className="rounded"
+                />
+                Time passed discount applied
+              </label>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={handleRecordPayment} disabled={isPending}
+                className="flex-1 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg py-2 text-sm font-medium transition-colors"
+              >
+                {isPending ? "Saving..." : "Record Payment"}
+              </button>
+              <button onClick={() => setPaymentModal(null)}
+                className="flex-1 border border-gray-300 text-gray-700 rounded-lg py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Profile Card */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-6">
         <div className="flex items-center justify-between mb-4">
@@ -161,6 +276,37 @@ export default function StudentProfilePage() {
               </>
             )}
           </div>
+        </div>
+
+        {/* Student ID row */}
+        <div className="mb-4 flex items-center gap-3">
+          <span className="text-xs text-gray-500 uppercase tracking-wider">Student ID:</span>
+          {editingStudentId ? (
+            <>
+              <input
+                type="text"
+                value={studentIdInput}
+                onChange={e => setStudentIdInput(e.target.value)}
+                className="border border-gray-200 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <button onClick={handleSaveStudentId} disabled={isPending} className="text-xs bg-teal-600 text-white px-2 py-1 rounded disabled:opacity-50">
+                Save
+              </button>
+              <button onClick={() => setEditingStudentId(false)} className="text-xs text-gray-500 px-2 py-1">
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-sm font-mono font-medium text-gray-800">{student.studentId ?? "—"}</span>
+              <button
+                onClick={() => { setEditingStudentId(true); setStudentIdInput(student.studentId ?? ""); }}
+                className="text-xs text-teal-600 hover:text-teal-800 font-medium"
+              >
+                Edit
+              </button>
+            </>
+          )}
         </div>
 
         {editing && (
@@ -236,7 +382,7 @@ export default function StudentProfilePage() {
       {/* Enrollments */}
       {student.enrollments.length > 0 && (
         <div className="space-y-6">
-          <h2 className="text-base font-semibold text-gray-800">Classes & Payments</h2>
+          <h2 className="text-base font-semibold text-gray-800">Classes &amp; Payments</h2>
           {student.enrollments.map(enrollment => {
             const tmpl = enrollment.courseClass.courseTemplate;
             const month = currentMonth(enrollment.courseClass.startDate, tmpl.durationMonths);
@@ -269,7 +415,13 @@ export default function StudentProfilePage() {
                           {p.monthNumber === month && <span className="ml-1 text-xs text-teal-600 font-medium">(current)</span>}
                         </td>
                         <td className="px-4 py-2 text-gray-600">{new Date(p.dueDate).toLocaleDateString()}</td>
-                        <td className="px-4 py-2 text-gray-800 font-medium">${p.amount}</td>
+                        <td className="px-4 py-2 text-gray-800 font-medium">
+                          ${p.amount}
+                          {p.status === "PARTIAL" && p.paidAmount != null && (
+                            <span className="ml-1 text-xs text-orange-600 font-normal">(paid ${p.paidAmount})</span>
+                          )}
+                          {p.discounted && <span className="ml-1 text-xs text-blue-500">discounted</span>}
+                        </td>
                         <td className="px-4 py-2">
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[p.status]}`}>
                             {p.status}
@@ -278,15 +430,27 @@ export default function StudentProfilePage() {
                         <td className="px-4 py-2">
                           {p.status !== "PAID" && (
                             <button
-                              onClick={() => handleMarkPaid(p.id)}
+                              onClick={() => openPaymentModal(p)}
                               disabled={isPending}
                               className="text-xs text-teal-600 hover:text-teal-800 font-medium disabled:opacity-40"
                             >
-                              Mark Paid
+                              Record Payment
                             </button>
                           )}
                           {p.status === "PAID" && p.paidAt && (
-                            <span className="text-xs text-gray-400">Paid {new Date(p.paidAt).toLocaleDateString()}</span>
+                            <span className="text-xs text-gray-400">
+                              Paid {new Date(p.paidAt).toLocaleDateString()}
+                              {p.feesRefId && <span className="ml-1 text-gray-300">#{p.feesRefId}</span>}
+                            </span>
+                          )}
+                          {p.status === "PARTIAL" && p.paidAt && (
+                            <button
+                              onClick={() => openPaymentModal(p)}
+                              disabled={isPending}
+                              className="text-xs text-orange-600 hover:text-orange-800 font-medium disabled:opacity-40"
+                            >
+                              Record Remaining
+                            </button>
                           )}
                         </td>
                       </tr>
@@ -304,6 +468,12 @@ export default function StudentProfilePage() {
           Not enrolled in any classes yet
         </div>
       )}
+
+      {/* Reports */}
+      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mt-6">
+        <h2 className="text-base font-semibold text-gray-800 mb-4">Reports</h2>
+        <ReportsSection reports={studentReports as Parameters<typeof ReportsSection>[0]["reports"]} />
+      </div>
     </div>
   );
 }

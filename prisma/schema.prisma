@@ -44,19 +44,28 @@ enum EnrollmentStatus {
 enum PaymentStatus {
   PENDING
   PAID
+  PARTIAL
   OVERDUE
 }
 
 model Branch {
-  id              String           @id @default(cuid())
+  id              String             @id @default(cuid())
   name            String
   address         String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
   users           User[]
   students        Student[]
   courseTemplates CourseTemplate[]
   courseClasses   CourseClass[]
+  products        Product[]
+  productSales    ProductSale[]
+  transactions    Transaction[]
+  officialHolidays OfficialHoliday[]
+  weeklyHolidays  WeeklyHoliday[]
+  staffAttendances StaffAttendance[]
+  attendanceReports AttendanceReport[]
+  attendanceFinalizations AttendanceFinalization[]
 }
 
 /// A course template defined by the General Manager
@@ -92,6 +101,8 @@ model CourseClass {
   sections         ClassSection[]
   exams            Exam[]
   courseEnrollments CourseEnrollment[]
+  studentAttendances StudentAttendance[]
+  classHolidays    ClassHoliday[]
 }
 
 /// One section of a CourseClass, taught by a single teacher
@@ -105,6 +116,7 @@ model ClassSection {
   teacher       User        @relation("TeachingSections", fields: [teacherId], references: [id])
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+  teacherAttendances TeacherAttendance[]
 
   @@unique([courseClassId, sectionNumber])
 }
@@ -119,6 +131,7 @@ model Exam {
   description   String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+  examScores    ExamScore[]
 }
 
 model User {
@@ -144,10 +157,16 @@ model User {
   managedClasses    CourseClass[]    @relation("ManagedClasses")
   teachingSections  ClassSection[]   @relation("TeachingSections")
   createdStudents   Student[]        @relation("CreatedStudents")
+  productSales      ProductSale[]
+  transactions      Transaction[]
+  staffAttendances  StaffAttendance[]
+  writtenReports    AttendanceReport[] @relation("WrittenReports")
+  finalizedDays     AttendanceFinalization[] @relation("FinalizedDays")
 }
 
 model Student {
   id           String             @id @default(cuid())
+  studentId    String?            @unique  // e.g. "john-doe-a4f2", auto-generated
   firstName    String
   lastName     String
   age          Int
@@ -165,6 +184,8 @@ model Student {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   enrollments  CourseEnrollment[]
+  examScores   ExamScore[]
+  studentAttendances StudentAttendance[]
 }
 
 /// A student enrolled in a CourseClass
@@ -191,6 +212,169 @@ model MonthlyPayment {
   dueDate      DateTime
   paidAt       DateTime?
   status       PaymentStatus    @default(PENDING)
+  fromDate     DateTime?        // date student joined (set on month 1 only, for mid-month joins)
+  paidAmount   Float?           // actual amount collected (for partial payments)
+  feesRefId    String?          // manager-entered reference/receipt ID
+  discounted   Boolean          @default(false) // true = "time passed discount" applied
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
+}
+
+model Product {
+  id        String        @id @default(cuid())
+  name      String
+  price     Float
+  stock     Int           @default(0)
+  branchId  String
+  branch    Branch        @relation(fields: [branchId], references: [id])
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  sales     ProductSale[]
+}
+
+model ProductSale {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  quantity    Int
+  totalPrice  Float    // quantity × price at time of sale
+  soldById    String
+  soldBy      User     @relation(fields: [soldById], references: [id])
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model Transaction {
+  id              String   @id @default(cuid())
+  trackingNumber  String   @unique
+  category        String   // free text + datalist presets
+  description     String?
+  amount          Float
+  transactionDate DateTime // manager-set; the actual date the expense occurred
+  branchId        String
+  branch          Branch   @relation(fields: [branchId], references: [id])
+  recordedById    String
+  recordedBy      User     @relation(fields: [recordedById], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ExamScore {
+  id        String   @id @default(cuid())
+  examId    String
+  exam      Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  score     Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([examId, studentId])
+}
+
+/// Official holidays created by GM — null branchId = applies to all branches
+model OfficialHoliday {
+  id        String   @id @default(cuid())
+  name      String   // reason/title e.g. "National Day", "School Event"
+  date      DateTime @db.Date
+  branchId  String?  // null = global; set = branch-specific
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model StudentAttendance {
+  id            String      @id @default(cuid())
+  courseClassId String
+  courseClass   CourseClass @relation(fields: [courseClassId], references: [id], onDelete: Cascade)
+  studentId     String
+  student       Student     @relation(fields: [studentId], references: [id])
+  date          DateTime    @db.Date
+  present       Boolean
+  isLate        Boolean     @default(false)
+
+  @@unique([courseClassId, studentId, date])
+}
+
+model TeacherAttendance {
+  id             String       @id @default(cuid())
+  classSectionId String
+  classSection   ClassSection @relation(fields: [classSectionId], references: [id], onDelete: Cascade)
+  teacherId      String
+  date           DateTime     @db.Date
+  present        Boolean
+  isLate         Boolean      @default(false)
+
+  @@unique([classSectionId, teacherId, date])
+}
+
+/// GM-set recurring weekly off-days — null branchId = all branches
+model WeeklyHoliday {
+  id        String   @id @default(cuid())
+  dayOfWeek String   // "Monday" … "Sunday"
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([dayOfWeek, branchId])
+}
+
+/// Manager-set one-off holiday for a specific class
+model ClassHoliday {
+  id            String      @id @default(cuid())
+  courseClassId String
+  courseClass   CourseClass @relation(fields: [courseClassId], references: [id], onDelete: Cascade)
+  date          DateTime    @db.Date
+  reason        String
+  createdAt     DateTime    @default(now())
+
+  @@unique([courseClassId, date])
+}
+
+/// Daily attendance record for STAFF role users
+model StaffAttendance {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  date      DateTime @db.Date
+  present   Boolean
+  isLate    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+}
+
+/// Reports written by managers about staff, teachers, students, or classes
+/// subjectType: "STAFF" | "TEACHER" | "STUDENT" | "CLASS"
+/// isAutomatic: true = auto-created from Late/Absent checkbox; false = manually written
+model AttendanceReport {
+  id          String   @id @default(cuid())
+  date        DateTime @db.Date
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id])
+  managerId   String
+  manager     User     @relation("WrittenReports", fields: [managerId], references: [id])
+  subjectType String   // "STAFF" | "TEACHER" | "STUDENT" | "CLASS"
+  subjectId   String   // userId for STAFF/TEACHER, studentId for STUDENT, courseClassId for CLASS
+  isAutomatic Boolean  @default(false)
+  reportType  String   // "LATE" | "ABSENT" | free-text category for manual
+  content     String?  // body text — optional for auto, required for manual
+  createdAt   DateTime @default(now())
+}
+
+/// Locks attendance for a given date+branch — all records become immutable after this
+model AttendanceFinalization {
+  id          String   @id @default(cuid())
+  date        DateTime @db.Date
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id])
+  managerId   String
+  manager     User     @relation("FinalizedDays", fields: [managerId], references: [id])
+  finalizedAt DateTime @default(now())
+
+  @@unique([date, branchId])
 }
