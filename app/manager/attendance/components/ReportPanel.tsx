@@ -32,7 +32,7 @@ export default function ReportPanel({ date, subjectType, subjectId, reports, fin
     setError("");
     startTransition(async () => {
       try {
-        await createReport({ date, subjectType, subjectId, reportType, content });
+        await createReport({ date, subjectType, subjectId, reportKind: "SIMPLE", reportType, content });
         setReportType("");
         setContent("");
         setShowForm(false);

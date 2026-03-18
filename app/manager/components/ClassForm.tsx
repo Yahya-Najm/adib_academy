@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClass, updateClass } from "../actions/classes";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -69,6 +69,14 @@ export default function ClassForm({ templates, teachers, initial, onSuccess, onC
 
   const selectedTemplate = templates.find(t => t.id === templateId);
 
+  const [idSuffix] = useState(() => Math.random().toString(16).slice(2, 6));
+  const idPreview = useMemo(() => {
+    if (!selectedTemplate) return "";
+    const parts = selectedTemplate.name.trim().toLowerCase().split(/\s+/);
+    const base = parts.slice(0, 2).join("-").replace(/[^a-z0-9-]/g, "");
+    return base ? `${base}-${idSuffix}` : "";
+  }, [selectedTemplate, idSuffix]);
+
   // When template changes, reset sections array to match numSections
   useEffect(() => {
     if (!selectedTemplate) { setSections([]); return; }
@@ -134,6 +142,12 @@ export default function ClassForm({ templates, teachers, initial, onSuccess, onC
                 </option>
               ))}
             </select>
+            {idPreview && (
+              <p className="mt-1 text-xs text-gray-400">
+                Class ID preview: <span className="font-mono text-gray-600">{idPreview}</span>
+                <span className="ml-1 text-gray-400">(suffix changes on save)</span>
+              </p>
+            )}
           </div>
         )}
         {editing && selectedTemplate && (

@@ -248,3 +248,21 @@ export async function recordPayment(
     },
   });
 }
+
+export async function getStudentExamScores(studentId: string) {
+  const { branchId } = await getManagerInfo();
+  const student = await prisma.student.findUnique({ where: { id: studentId }, select: { branchId: true } });
+  if (!student || student.branchId !== branchId) throw new Error("Student not found");
+
+  return prisma.examScore.findMany({
+    where: { studentId },
+    include: {
+      exam: {
+        include: {
+          courseClass: { include: { courseTemplate: { select: { name: true } } } },
+        },
+      },
+    },
+    orderBy: { exam: { date: "desc" } },
+  });
+}

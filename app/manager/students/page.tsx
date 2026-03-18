@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { getStudents, createStudent } from "../actions/students";
 import { EducationLevel } from "@prisma/client";
@@ -29,6 +29,13 @@ export default function StudentsPage() {
   const [form, setForm] = useState(BLANK);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [idSuffix] = useState(() => Math.random().toString(16).slice(2, 6));
+  const idPreview = useMemo(() => {
+    const first = form.firstName.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    const last = form.lastName.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    const base = [first, last].filter(Boolean).join("-");
+    return base ? `${base}-${idSuffix}` : "";
+  }, [form.firstName, form.lastName, idSuffix]);
 
   async function load(q?: string) {
     setStudents(await getStudents(q));
@@ -123,6 +130,14 @@ export default function StudentsPage() {
           <div className="grid grid-cols-2 gap-4">
             {field("firstName", "First Name", "text", true)}
             {field("lastName", "Last Name", "text", true)}
+            {idPreview && (
+              <div className="col-span-2 -mt-2">
+                <p className="text-xs text-gray-400">
+                  ID preview: <span className="font-mono text-gray-600">{idPreview}</span>
+                  <span className="ml-1 text-gray-400">(suffix changes on save)</span>
+                </p>
+              </div>
+            )}
             {field("age", "Age", "number", true)}
             {field("phone", "Phone Number")}
             {field("email", "Email", "email")}

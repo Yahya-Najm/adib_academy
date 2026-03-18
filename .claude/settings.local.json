@@ -11,7 +11,8 @@
       "Bash(ls /e/adib/adib_acadmey/app/manager/students/[id])",
       "Bash(ls /e/adib/adib_acadmey/app/manager/classes/[id])",
       "Bash(npx prisma:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(2)"
     ]
   }
 }

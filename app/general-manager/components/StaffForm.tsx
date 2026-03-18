@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createStaff, updateStaff } from "../actions/staff";
 
 const STAFF_TYPES = ["Cleaner", "Cook", "Security", "Receptionist", "Driver", "Maintenance", "Other"];
@@ -34,6 +34,12 @@ export default function StaffForm({ branches, initial, onSuccess, onCancel }: Pr
     monthlySalary: initial?.monthlySalary?.toString() ?? "",
     active: initial?.active ?? true,
   });
+  const [idSuffix] = useState(() => Math.random().toString(16).slice(2, 6));
+  const idPreview = useMemo(() => {
+    const parts = form.name.trim().toLowerCase().split(/\s+/);
+    const base = parts.slice(0, 2).join("-").replace(/[^a-z0-9-]/g, "");
+    return base ? `${base}-${idSuffix}` : "";
+  }, [form.name, idSuffix]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -69,6 +75,12 @@ export default function StaffForm({ branches, initial, onSuccess, onCancel }: Pr
             value={form.name} onChange={e => field("name", e.target.value)} required
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
           />
+          {!editing && idPreview && (
+            <p className="mt-1 text-xs text-gray-400">
+              ID preview: <span className="font-mono text-gray-600">{idPreview}</span>
+              <span className="ml-1 text-gray-400">(suffix changes on save)</span>
+            </p>
+          )}
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Staff Type *</label>

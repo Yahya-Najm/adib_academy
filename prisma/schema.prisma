@@ -48,6 +48,16 @@ enum PaymentStatus {
   OVERDUE
 }
 
+enum ReportKind {
+  SIMPLE      // informational note, no action needed
+  ACTIONABLE  // requires manager to do something and mark done/undone
+}
+
+enum ExamType {
+  REGULAR
+  FINAL
+}
+
 model Branch {
   id              String             @id @default(cuid())
   name            String
@@ -66,6 +76,7 @@ model Branch {
   staffAttendances StaffAttendance[]
   attendanceReports AttendanceReport[]
   attendanceFinalizations AttendanceFinalization[]
+  classMonthFinalizations ClassMonthFinalization[]
 }
 
 /// A course template defined by the General Manager
@@ -86,6 +97,7 @@ model CourseTemplate {
 /// A running class instance started by a manager
 model CourseClass {
   id               String             @id @default(cuid())
+  classId          String?            @unique  // e.g. "english-grammar-a4f2" — auto-generated on create
   courseTemplateId String
   courseTemplate   CourseTemplate     @relation(fields: [courseTemplateId], references: [id])
   branchId         String
@@ -103,6 +115,7 @@ model CourseClass {
   courseEnrollments CourseEnrollment[]
   studentAttendances StudentAttendance[]
   classHolidays    ClassHoliday[]
+  monthFinalizations ClassMonthFinalization[]
 }
 
 /// One section of a CourseClass, taught by a single teacher
@@ -123,19 +136,28 @@ model ClassSection {
 
 /// An exam for a CourseClass
 model Exam {
-  id            String      @id @default(cuid())
-  courseClassId String
-  courseClass   CourseClass @relation(fields: [courseClassId], references: [id], onDelete: Cascade)
-  title         String
-  date          DateTime
-  description   String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  examScores    ExamScore[]
+  id                    String      @id @default(cuid())
+  courseClassId         String
+  courseClass           CourseClass @relation(fields: [courseClassId], references: [id], onDelete: Cascade)
+  title                 String
+  date                  DateTime
+  description           String?
+  examType              ExamType    @default(REGULAR)
+  classMonth            Int?        // which month of the class this exam falls in (auto-detected)
+  proctorId             String?     // the teacher/manager who supervised the exam
+  proctor               User?       @relation("ProctorExams", fields: [proctorId], references: [id])
+  scoringFinalized      Boolean     @default(false)
+  scoringFinalizedAt    DateTime?
+  scoringFinalizedById  String?
+  scoringFinalizedBy    User?       @relation("FinalizedExamScoring", fields: [scoringFinalizedById], references: [id])
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  examScores            ExamScore[]
 }
 
 model User {
   id                String           @id @default(cuid())
+  userId            String?          @unique  // e.g. "john-doe-a4f2" — auto-generated for all roles
   name              String
   email             String?          @unique
   password          String
@@ -161,7 +183,11 @@ model User {
   transactions      Transaction[]
   staffAttendances  StaffAttendance[]
   writtenReports    AttendanceReport[] @relation("WrittenReports")
+  resolvedReports   AttendanceReport[] @relation("ResolvedReports")
   finalizedDays     AttendanceFinalization[] @relation("FinalizedDays")
+  proctorExams      Exam[]           @relation("ProctorExams")
+  finalizedExamScoring Exam[]        @relation("FinalizedExamScoring")
+  finalizedClassMonths ClassMonthFinalization[] @relation("FinalizedClassMonths")
 }
 
 model Student {
@@ -349,32 +375,59 @@ model StaffAttendance {
 }
 
 /// Reports written by managers about staff, teachers, students, or classes
-/// subjectType: "STAFF" | "TEACHER" | "STUDENT" | "CLASS"
+/// reportKind: SIMPLE = informational note; ACTIONABLE = requires manager action + done/undone
 /// isAutomatic: true = auto-created from Late/Absent checkbox; false = manually written
 model AttendanceReport {
-  id          String   @id @default(cuid())
-  date        DateTime @db.Date
-  branchId    String
-  branch      Branch   @relation(fields: [branchId], references: [id])
-  managerId   String
-  manager     User     @relation("WrittenReports", fields: [managerId], references: [id])
-  subjectType String   // "STAFF" | "TEACHER" | "STUDENT" | "CLASS"
-  subjectId   String   // userId for STAFF/TEACHER, studentId for STUDENT, courseClassId for CLASS
-  isAutomatic Boolean  @default(false)
-  reportType  String   // "LATE" | "ABSENT" | free-text category for manual
-  content     String?  // body text — optional for auto, required for manual
-  createdAt   DateTime @default(now())
+  id               String      @id @default(cuid())
+  date             DateTime    @db.Date
+  branchId         String
+  branch           Branch      @relation(fields: [branchId], references: [id])
+  managerId        String
+  manager          User        @relation("WrittenReports", fields: [managerId], references: [id])
+  subjectType      String      // "STAFF" | "TEACHER" | "STUDENT" | "CLASS"
+  subjectId        String      // userId for STAFF/TEACHER, studentId for STUDENT, courseClassId for CLASS
+  isAutomatic      Boolean     @default(false)
+  reportKind       ReportKind  @default(SIMPLE)
+  reportType       String      // "LATE" | "ABSENT" | free-text category for manual
+  content          String?     // body text — optional for auto, required for manual
+  // Actionable report fields
+  actionDescription String?    // what action the manager must take
+  isDone           Boolean?    // null for SIMPLE; true/false for ACTIONABLE
+  doneAt           DateTime?
+  doneById         String?
+  doneBy           User?       @relation("ResolvedReports", fields: [doneById], references: [id])
+  createdAt        DateTime    @default(now())
 }
 
-/// Locks attendance for a given date+branch — all records become immutable after this
+/// Granular attendance finalization — locks attendance per class / per staff / per teacher per day
+/// finalizationType: "CLASS" = all student attendance for that class; "STAFF" = one staff member; "TEACHER" = one teacher (all sections)
 model AttendanceFinalization {
-  id          String   @id @default(cuid())
-  date        DateTime @db.Date
-  branchId    String
-  branch      Branch   @relation(fields: [branchId], references: [id])
-  managerId   String
-  manager     User     @relation("FinalizedDays", fields: [managerId], references: [id])
-  finalizedAt DateTime @default(now())
+  id                 String   @id @default(cuid())
+  date               DateTime @db.Date
+  branchId           String
+  branch             Branch   @relation(fields: [branchId], references: [id])
+  managerId          String
+  manager            User     @relation("FinalizedDays", fields: [managerId], references: [id])
+  finalizationType   String   // "CLASS" | "STAFF" | "TEACHER"
+  scopeId            String   // courseClassId for CLASS; userId for STAFF/TEACHER
+  finalizedAt        DateTime @default(now())
 
-  @@unique([date, branchId])
+  @@unique([date, branchId, finalizationType, scopeId])
+}
+
+/// Monthly snapshot for a class — locks teacher-per-section and student roster for that month
+model ClassMonthFinalization {
+  id               String      @id @default(cuid())
+  courseClassId    String
+  courseClass      CourseClass @relation(fields: [courseClassId], references: [id], onDelete: Cascade)
+  branchId         String
+  branch           Branch      @relation(fields: [branchId], references: [id])
+  monthNumber      Int
+  finalizedAt      DateTime    @default(now())
+  finalizedById    String
+  finalizedBy      User        @relation("FinalizedClassMonths", fields: [finalizedById], references: [id])
+  sectionsSnapshot Json        // [{sectionNumber, sectionName, teacherId, teacherName}] at time of finalization
+  studentsSnapshot Json        // [{studentId, studentDbId, firstName, lastName}] at time of finalization
+
+  @@unique([courseClassId, monthNumber])
 }

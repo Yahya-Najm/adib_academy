@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { requireGM } from "./guard";
+import { generateUserId } from "@/lib/generateUserId";
 
 export async function getTeachers() {
   await requireGM();
@@ -28,8 +29,10 @@ export async function createTeacher(
   if (!["PER_CLASS", "REVENUE_PERCENTAGE"].includes(paymentType))
     throw new Error("Invalid payment type for teacher");
   const hashed = await bcrypt.hash(password, 10);
+  const userId = await generateUserId(name);
   return prisma.user.create({
     data: {
+      userId,
       name: name.trim(),
       email: email.trim().toLowerCase(),
       password: hashed,
@@ -68,4 +71,57 @@ export async function updateTeacher(
 export async function deleteTeacher(id: string) {
   await requireGM();
   return prisma.user.delete({ where: { id } });
+}
+
+export async function getTeacherProfileGM(teacherId: string) {
+  await requireGM();
+
+  const teacher = await prisma.user.findUnique({
+    where: { id: teacherId },
+    select: {
+      id: true, name: true, userId: true, email: true, active: true,
+      paymentType: true, perClassRate: true, revenuePercentage: true,
+      createdAt: true, branchId: true,
+      branch: { select: { name: true } },
+    },
+  });
+  if (!teacher) throw new Error("Teacher not found");
+
+  const [sections, proctorExams, reports] = await Promise.all([
+    prisma.classSection.findMany({
+      where: { teacherId },
+      include: {
+        courseClass: {
+          include: {
+            courseTemplate: { select: { name: true } },
+            branch: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.exam.findMany({
+      where: { proctorId: teacherId },
+      include: {
+        courseClass: {
+          include: {
+            courseTemplate: { select: { name: true } },
+            branch: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { date: "desc" },
+    }),
+    prisma.attendanceReport.findMany({
+      where: { subjectType: "TEACHER", subjectId: teacherId },
+      include: {
+        manager: { select: { name: true } },
+        branch: { select: { name: true } },
+        doneBy: { select: { name: true } },
+      },
+      orderBy: { date: "desc" },
+    }),
+  ]);
+
+  return { teacher, sections, proctorExams, reports };
 }

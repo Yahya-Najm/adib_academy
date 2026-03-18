@@ -27,6 +27,26 @@ export async function getAllStudents(search?: string) {
   });
 }
 
+export async function getStudentExamScoresGM(studentId: string) {
+  await requireGM();
+  return prisma.examScore.findMany({
+    where: { studentId },
+    include: {
+      exam: {
+        include: {
+          courseClass: {
+            include: {
+              courseTemplate: { select: { name: true } },
+              branch: { select: { name: true } },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { exam: { date: "desc" } },
+  });
+}
+
 export async function getStudentGM(id: string) {
   await requireGM();
   return prisma.student.findUnique({

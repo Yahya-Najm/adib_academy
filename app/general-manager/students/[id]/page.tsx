@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { getStudentGM } from "../../actions/students";
+import { getStudentGM, getStudentExamScoresGM } from "../../actions/students";
 import { getReportsForSubjectGM } from "../../actions/reports";
 import ReportsSection from "@/components/reports/ReportsSection";
 import { EducationLevel } from "@prisma/client";
 
 type Student = Awaited<ReturnType<typeof getStudentGM>>;
 type StudentReport = Awaited<ReturnType<typeof getReportsForSubjectGM>>[number];
+type ExamScore = Awaited<ReturnType<typeof getStudentExamScoresGM>>[number];
 
 const EDU_LABELS: Record<EducationLevel, string> = {
   BELOW_GRADE_6: "Below Grade 6",
@@ -47,10 +48,12 @@ export default function GMStudentProfilePage() {
   const { id } = useParams<{ id: string }>();
   const [student, setStudent] = useState<Student | null>(null);
   const [reports, setReports] = useState<StudentReport[]>([]);
+  const [examScores, setExamScores] = useState<ExamScore[]>([]);
 
   useEffect(() => {
     getStudentGM(id).then(setStudent);
     getReportsForSubjectGM("STUDENT", id).then(setReports).catch(() => {});
+    getStudentExamScoresGM(id).then(setExamScores).catch(() => {});
   }, [id]);
 
   if (!student) return <div className="p-8 text-gray-400">Loading...</div>;
@@ -137,6 +140,36 @@ export default function GMStudentProfilePage() {
       ) : (
         <div className="text-center text-gray-400 text-sm py-8 bg-white border border-gray-200 rounded-xl">
           Not enrolled in any classes
+        </div>
+      )}
+
+      {/* Exam Scores */}
+      {examScores.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mt-6">
+          <h2 className="text-base font-semibold text-gray-800 mb-4">Exam Scores</h2>
+          <div className="space-y-2">
+            {examScores.map(sc => {
+              const isFinal = sc.exam.examType === "FINAL";
+              return (
+                <div key={sc.id} className={`flex items-center justify-between border rounded-lg px-4 py-3 ${isFinal ? "border-purple-200 bg-purple-50" : "border-gray-200"}`}>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      {isFinal && (
+                        <span className="text-xs font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full uppercase tracking-wide">Final</span>
+                      )}
+                      <p className="text-sm font-medium text-gray-900">{sc.exam.title}</p>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {sc.exam.courseClass.courseTemplate.name}
+                      {sc.exam.courseClass.branch && ` · ${sc.exam.courseClass.branch.name}`}
+                      {" · "}{new Date(sc.exam.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    </p>
+                  </div>
+                  <span className={`text-lg font-bold ${isFinal ? "text-purple-700" : "text-teal-700"}`}>{sc.score}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

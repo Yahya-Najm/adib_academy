@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { requireGM } from "./guard";
+import { generateUserId } from "@/lib/generateUserId";
 
 export async function getManagers() {
   await requireGM();
@@ -26,8 +27,10 @@ export async function createManager(
   if (!name.trim() || !email.trim() || !password)
     throw new Error("Name, email and password are required");
   const hashed = await bcrypt.hash(password, 10);
+  const userId = await generateUserId(name);
   return prisma.user.create({
     data: {
+      userId,
       name: name.trim(),
       email: email.trim().toLowerCase(),
       password: hashed,

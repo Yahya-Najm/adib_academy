@@ -14,51 +14,32 @@ async function getManagerInfo() {
 async function getDateHolidayLabel(date: Date, branchId: string): Promise<string | null> {
   const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
 
-  // Weekly holiday: global or this branch
   const weekly = await prisma.weeklyHoliday.findFirst({
-    where: {
-      dayOfWeek: dayName,
-      OR: [{ branchId: null }, { branchId }],
-    },
+    where: { dayOfWeek: dayName, OR: [{ branchId: null }, { branchId }] },
   });
   if (weekly) return `Weekly Off — ${dayName}`;
 
-  // Official holiday: global or this branch
   const official = await prisma.officialHoliday.findFirst({
-    where: {
-      date,
-      OR: [{ branchId: null }, { branchId }],
-    },
+    where: { date, OR: [{ branchId: null }, { branchId }] },
   });
   if (official) return `Holiday — ${official.name}`;
 
   return null;
 }
 
-// ── Finalization ───────────────────────────────────────────────────────────────
+// ── Granular finalization helpers ─────────────────────────────────────────────
 
-export async function getFinalization(dateStr: string) {
-  const { branchId } = await getManagerInfo();
-  if (!branchId) return null;
-  const date = new Date(dateStr);
+async function getScopeFinalization(date: Date, branchId: string, finalizationType: string, scopeId: string) {
   return prisma.attendanceFinalization.findUnique({
-    where: { date_branchId: { date, branchId } },
-    include: { manager: { select: { name: true } } },
+    where: {
+      date_branchId_finalizationType_scopeId: { date, branchId, finalizationType, scopeId },
+    },
   });
 }
 
-export async function finalizeDay(dateStr: string) {
-  const { id: managerId, branchId } = await getManagerInfo();
-  if (!branchId) throw new Error("No branch assigned");
-  const date = new Date(dateStr);
-
-  const existing = await prisma.attendanceFinalization.findUnique({
-    where: { date_branchId: { date, branchId } },
-  });
-  if (existing) throw new Error("This day is already finalized");
-
+async function createScopeFinalization(date: Date, branchId: string, managerId: string, finalizationType: string, scopeId: string) {
   return prisma.attendanceFinalization.create({
-    data: { date, branchId, managerId },
+    data: { date, branchId, managerId, finalizationType, scopeId },
   });
 }
 
@@ -70,14 +51,10 @@ export async function getStaffAttendanceContext(dateStr: string) {
 
   const date = new Date(dateStr);
   const holidayLabel = await getDateHolidayLabel(date, branchId);
-  const finalization = await prisma.attendanceFinalization.findUnique({
-    where: { date_branchId: { date, branchId } },
-    include: { manager: { select: { name: true } } },
-  });
 
   const staff = await prisma.user.findMany({
     where: { role: "STAFF", active: true, branchId },
-    select: { id: true, name: true, staffType: true },
+    select: { id: true, name: true, staffType: true, userId: true },
     orderBy: { name: "asc" },
   });
 
@@ -92,7 +69,31 @@ export async function getStaffAttendanceContext(dateStr: string) {
     orderBy: { createdAt: "asc" },
   });
 
-  return { staff, records, reports, holidayLabel, finalization, date: dateStr };
+  // Per-staff finalization status
+  const finalizations = await prisma.attendanceFinalization.findMany({
+    where: { branchId, date, finalizationType: "STAFF" },
+  });
+  const finalizedStaffIds = new Set(finalizations.map(f => f.scopeId));
+
+  return { staff, records, reports, holidayLabel, finalizedStaffIds: [...finalizedStaffIds], date: dateStr };
+}
+
+export async function finalizeStaffAttendance(staffId: string, dateStr: string) {
+  const { id: managerId, branchId } = await getManagerInfo();
+  if (!branchId) throw new Error("No branch assigned");
+
+  const date = new Date(dateStr);
+
+  // Check all staff marked
+  const record = await prisma.staffAttendance.findUnique({
+    where: { userId_date: { userId: staffId, date } },
+  });
+  if (!record) throw new Error("Attendance not recorded for this staff member — mark present or absent first");
+
+  const existing = await getScopeFinalization(date, branchId, "STAFF", staffId);
+  if (existing) throw new Error("Already finalized");
+
+  return createScopeFinalization(date, branchId, managerId, "STAFF", staffId);
 }
 
 export async function upsertStaffAttendance(data: {
@@ -106,17 +107,13 @@ export async function upsertStaffAttendance(data: {
 
   const date = new Date(data.date);
 
-  // Block if finalized
-  const fin = await prisma.attendanceFinalization.findUnique({
-    where: { date_branchId: { date, branchId } },
-  });
-  if (fin) throw new Error("This day has been finalized and cannot be changed");
+  // Block if this staff member's attendance is finalized for this day
+  const fin = await getScopeFinalization(date, branchId, "STAFF", data.userId);
+  if (fin) throw new Error("This staff member's attendance for this day has been finalized");
 
-  // Block if holiday
   const holidayLabel = await getDateHolidayLabel(date, branchId);
   if (holidayLabel) throw new Error(`Cannot record attendance on a holiday: ${holidayLabel}`);
 
-  // Verify staff belongs to branch
   const user = await prisma.user.findUnique({ where: { id: data.userId } });
   if (!user || user.branchId !== branchId || user.role !== "STAFF")
     throw new Error("Staff member not found in your branch");
@@ -127,7 +124,6 @@ export async function upsertStaffAttendance(data: {
     update: { present: data.present, isLate: data.isLate },
   });
 
-  // Auto-create ABSENT report if marking absent (only once)
   if (!data.present) {
     const exists = await prisma.attendanceReport.findFirst({
       where: { date, branchId, subjectType: "STAFF", subjectId: data.userId, reportType: "ABSENT", isAutomatic: true },
@@ -138,13 +134,11 @@ export async function upsertStaffAttendance(data: {
       });
     }
   } else {
-    // Remove auto ABSENT report if re-marking present
     await prisma.attendanceReport.deleteMany({
       where: { date, branchId, subjectType: "STAFF", subjectId: data.userId, reportType: "ABSENT", isAutomatic: true },
     });
   }
 
-  // Auto-create LATE report if late (only once)
   if (data.isLate) {
     const exists = await prisma.attendanceReport.findFirst({
       where: { date, branchId, subjectType: "STAFF", subjectId: data.userId, reportType: "LATE", isAutomatic: true },
@@ -171,34 +165,24 @@ export async function getTeacherAttendanceContext(dateStr: string) {
 
   const date = new Date(dateStr);
   const holidayLabel = await getDateHolidayLabel(date, branchId);
-  const finalization = await prisma.attendanceFinalization.findUnique({
-    where: { date_branchId: { date, branchId } },
-    include: { manager: { select: { name: true } } },
-  });
 
-  // All active classes in this branch with their sections + teachers
   const classes = await prisma.courseClass.findMany({
     where: { branchId, status: "ACTIVE" },
     include: {
       courseTemplate: { select: { name: true } },
       sections: {
-        include: { teacher: { select: { id: true, name: true } } },
+        include: { teacher: { select: { id: true, name: true, userId: true } } },
         orderBy: { sectionNumber: "asc" },
       },
     },
     orderBy: { createdAt: "desc" },
   });
 
-  // Filter out classes that are off that day (class offDays)
   const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
   const activeClasses = classes.filter(c => !c.offDays.includes(dayName));
 
-  // Check class-level holidays
   const classHolidays = await prisma.classHoliday.findMany({
-    where: {
-      courseClassId: { in: activeClasses.map(c => c.id) },
-      date,
-    },
+    where: { courseClassId: { in: activeClasses.map(c => c.id) }, date },
   });
   const classHolidayMap = Object.fromEntries(classHolidays.map(ch => [ch.courseClassId, ch.reason]));
 
@@ -215,7 +199,44 @@ export async function getTeacherAttendanceContext(dateStr: string) {
     orderBy: { createdAt: "asc" },
   });
 
-  return { classes: activeClasses, classHolidayMap, records, reports, holidayLabel, finalization, date: dateStr };
+  // Per-teacher finalization status
+  const finalizations = await prisma.attendanceFinalization.findMany({
+    where: { branchId, date, finalizationType: "TEACHER" },
+  });
+  const finalizedTeacherIds = new Set(finalizations.map(f => f.scopeId));
+
+  return { classes: activeClasses, classHolidayMap, records, reports, holidayLabel, finalizedTeacherIds: [...finalizedTeacherIds], date: dateStr };
+}
+
+export async function finalizeTeacherAttendance(teacherId: string, dateStr: string) {
+  const { id: managerId, branchId } = await getManagerInfo();
+  if (!branchId) throw new Error("No branch assigned");
+
+  const date = new Date(dateStr);
+
+  // Check teacher has at least one section with attendance recorded on this day
+  const sections = await prisma.classSection.findMany({
+    where: { teacherId, courseClass: { branchId, status: "ACTIVE" } },
+    select: { id: true },
+  });
+
+  if (sections.length === 0) throw new Error("Teacher has no active sections");
+
+  const records = await prisma.teacherAttendance.findMany({
+    where: { classSectionId: { in: sections.map(s => s.id) }, teacherId, date },
+  });
+
+  const sectionsWithAttendance = new Set(records.map(r => r.classSectionId));
+  const missingSections = sections.filter(s => !sectionsWithAttendance.has(s.id));
+
+  if (missingSections.length > 0) {
+    throw new Error(`Attendance not recorded for all sections of this teacher — mark each section before finalizing`);
+  }
+
+  const existing = await getScopeFinalization(date, branchId, "TEACHER", teacherId);
+  if (existing) throw new Error("Already finalized");
+
+  return createScopeFinalization(date, branchId, managerId, "TEACHER", teacherId);
 }
 
 export async function upsertTeacherAttendance(data: {
@@ -230,18 +251,16 @@ export async function upsertTeacherAttendance(data: {
 
   const date = new Date(data.date);
 
-  const fin = await prisma.attendanceFinalization.findUnique({
-    where: { date_branchId: { date, branchId } },
-  });
-  if (fin) throw new Error("This day has been finalized and cannot be changed");
+  // Block if this teacher's attendance is finalized for this day
+  const fin = await getScopeFinalization(date, branchId, "TEACHER", data.teacherId);
+  if (fin) throw new Error("This teacher's attendance for this day has been finalized");
 
   const holidayLabel = await getDateHolidayLabel(date, branchId);
   if (holidayLabel) throw new Error(`Cannot record attendance on a holiday: ${holidayLabel}`);
 
-  // Verify section belongs to a class in this branch
   const section = await prisma.classSection.findUnique({
     where: { id: data.classSectionId },
-    include: { courseClass: { select: { branchId: true, offDays: true } } },
+    include: { courseClass: { select: { branchId: true, offDays: true, id: true } } },
   });
   if (!section || section.courseClass.branchId !== branchId)
     throw new Error("Section not found in your branch");
@@ -250,7 +269,6 @@ export async function upsertTeacherAttendance(data: {
   if (section.courseClass.offDays.includes(dayName))
     throw new Error("This class is off on this day");
 
-  // Check class holiday
   const classHoliday = await prisma.classHoliday.findUnique({
     where: { courseClassId_date: { courseClassId: section.courseClassId, date } },
   });
@@ -262,7 +280,6 @@ export async function upsertTeacherAttendance(data: {
     update: { present: data.present, isLate: data.isLate },
   });
 
-  // Auto ABSENT report
   if (!data.present) {
     const exists = await prisma.attendanceReport.findFirst({
       where: { date, branchId, subjectType: "TEACHER", subjectId: data.teacherId, reportType: "ABSENT", isAutomatic: true },
@@ -278,7 +295,6 @@ export async function upsertTeacherAttendance(data: {
     });
   }
 
-  // Auto LATE report
   if (data.isLate) {
     const exists = await prisma.attendanceReport.findFirst({
       where: { date, branchId, subjectType: "TEACHER", subjectId: data.teacherId, reportType: "LATE", isAutomatic: true },
@@ -305,10 +321,6 @@ export async function getStudentAttendanceContext(dateStr: string) {
 
   const date = new Date(dateStr);
   const holidayLabel = await getDateHolidayLabel(date, branchId);
-  const finalization = await prisma.attendanceFinalization.findUnique({
-    where: { date_branchId: { date, branchId } },
-    include: { manager: { select: { name: true } } },
-  });
 
   const classes = await prisma.courseClass.findMany({
     where: { branchId, status: "ACTIVE" },
@@ -324,10 +336,8 @@ export async function getStudentAttendanceContext(dateStr: string) {
   });
 
   const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
-  // Filter out classes off that day by recurring offDays
   const activeClasses = classes.filter(c => !c.offDays.includes(dayName));
 
-  // Class holidays for these classes on this date
   const classHolidays = await prisma.classHoliday.findMany({
     where: { courseClassId: { in: activeClasses.map(c => c.id) }, date },
   });
@@ -347,7 +357,51 @@ export async function getStudentAttendanceContext(dateStr: string) {
     orderBy: { createdAt: "asc" },
   });
 
-  return { classes: activeClasses, classHolidayMap, records, reports, holidayLabel, finalization, date: dateStr };
+  // Per-class finalization status
+  const finalizations = await prisma.attendanceFinalization.findMany({
+    where: { branchId, date, finalizationType: "CLASS" },
+  });
+  const finalizedClassIds = new Set(finalizations.map(f => f.scopeId));
+
+  return { classes: activeClasses, classHolidayMap, records, reports, holidayLabel, finalizedClassIds: [...finalizedClassIds], date: dateStr };
+}
+
+export async function finalizeClassAttendance(courseClassId: string, dateStr: string) {
+  const { id: managerId, branchId } = await getManagerInfo();
+  if (!branchId) throw new Error("No branch assigned");
+
+  const date = new Date(dateStr);
+
+  const cls = await prisma.courseClass.findUnique({
+    where: { id: courseClassId },
+    include: {
+      courseEnrollments: { where: { status: "ACTIVE" }, select: { studentId: true } },
+    },
+  });
+  if (!cls || cls.branchId !== branchId) throw new Error("Class not found");
+
+  // All enrolled students must have attendance recorded
+  const enrolled = cls.courseEnrollments.map(e => e.studentId);
+  const records = await prisma.studentAttendance.findMany({
+    where: { courseClassId, date },
+    select: { studentId: true },
+  });
+  const recordedIds = new Set(records.map(r => r.studentId));
+  const missing = enrolled.filter(id => !recordedIds.has(id));
+
+  if (missing.length > 0) {
+    const students = await prisma.student.findMany({
+      where: { id: { in: missing } },
+      select: { firstName: true, lastName: true },
+    });
+    const names = students.map(s => `${s.firstName} ${s.lastName}`).join(", ");
+    throw new Error(`Attendance not recorded for: ${names}`);
+  }
+
+  const existing = await getScopeFinalization(date, branchId, "CLASS", courseClassId);
+  if (existing) throw new Error("Already finalized");
+
+  return createScopeFinalization(date, branchId, managerId, "CLASS", courseClassId);
 }
 
 export async function upsertStudentAttendance(data: {
@@ -362,15 +416,13 @@ export async function upsertStudentAttendance(data: {
 
   const date = new Date(data.date);
 
-  const fin = await prisma.attendanceFinalization.findUnique({
-    where: { date_branchId: { date, branchId } },
-  });
-  if (fin) throw new Error("This day has been finalized and cannot be changed");
+  // Block if this class's attendance is finalized for this day
+  const fin = await getScopeFinalization(date, branchId, "CLASS", data.courseClassId);
+  if (fin) throw new Error("This class's attendance for this day has been finalized");
 
   const holidayLabel = await getDateHolidayLabel(date, branchId);
   if (holidayLabel) throw new Error(`Cannot record attendance on a holiday: ${holidayLabel}`);
 
-  // Verify class belongs to this branch
   const cls = await prisma.courseClass.findUnique({ where: { id: data.courseClassId } });
   if (!cls || cls.branchId !== branchId) throw new Error("Class not found in your branch");
 
@@ -382,7 +434,6 @@ export async function upsertStudentAttendance(data: {
   });
   if (classHoliday) throw new Error(`Class holiday: ${classHoliday.reason}`);
 
-  // Verify student is enrolled in this class
   const enrollment = await prisma.courseEnrollment.findUnique({
     where: { studentId_courseClassId: { studentId: data.studentId, courseClassId: data.courseClassId } },
   });
@@ -395,7 +446,6 @@ export async function upsertStudentAttendance(data: {
     update: { present: data.present, isLate: data.isLate },
   });
 
-  // Auto ABSENT report
   if (!data.present) {
     const exists = await prisma.attendanceReport.findFirst({
       where: { date, branchId, subjectType: "STUDENT", subjectId: data.studentId, reportType: "ABSENT", isAutomatic: true },
@@ -411,7 +461,6 @@ export async function upsertStudentAttendance(data: {
     });
   }
 
-  // Auto LATE report
   if (data.isLate) {
     const exists = await prisma.attendanceReport.findFirst({
       where: { date, branchId, subjectType: "STUDENT", subjectId: data.studentId, reportType: "LATE", isAutomatic: true },

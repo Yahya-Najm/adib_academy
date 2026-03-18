@@ -31,7 +31,7 @@ interface CourseClass {
   courseTemplate: { name: string; numSections: number; durationMonths: number; monthlyFee: number };
   branch: { name: string };
   sections: ClassSection[];
-  exams: { id: string; title: string; date: Date; description: string | null; courseClassId: string; createdAt: Date; updatedAt: Date }[];
+  exams: { id: string; title: string; date: Date; description: string | null; courseClassId: string; examType: import("@prisma/client").ExamType; classMonth: number | null; proctorId: string | null; scoringFinalized: boolean; scoringFinalizedAt: Date | null; scoringFinalizedById: string | null; createdAt: Date; updatedAt: Date }[];
 }
 
 interface Props {

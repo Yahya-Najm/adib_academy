@@ -5,9 +5,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   getStudent, updateStudent, updateStudentId, getClassesForEnrollment,
-  enrollStudent, recordPayment,
+  enrollStudent, recordPayment, getStudentExamScores,
 } from "../../actions/students";
 import { getReportsForSubject } from "../../actions/reports";
+import { markReportDone } from "../../actions/reports";
 import ReportsSection from "@/components/reports/ReportsSection";
 import { EducationLevel } from "@prisma/client";
 
@@ -15,6 +16,7 @@ type Student = Awaited<ReturnType<typeof getStudent>>;
 type Classes = Awaited<ReturnType<typeof getClassesForEnrollment>>;
 type Payment = Student["enrollments"][number]["monthlyPayments"][number];
 type StudentReport = Awaited<ReturnType<typeof getReportsForSubject>>[number];
+type ExamScore = Awaited<ReturnType<typeof getStudentExamScores>>[number];
 
 const EDU_LABELS: Record<EducationLevel, string> = {
   BELOW_GRADE_6: "Below Grade 6",
@@ -62,12 +64,14 @@ export default function StudentProfilePage() {
   const [paymentModal, setPaymentModal] = useState<Payment | null>(null);
   const [payForm, setPayForm] = useState({ paidAmount: "", feesRefId: "", discounted: false, paidAt: today() });
   const [studentReports, setStudentReports] = useState<StudentReport[]>([]);
+  const [examScores, setExamScores] = useState<ExamScore[]>([]);
 
   async function load() {
-    const [s, c, reports] = await Promise.all([getStudent(id), getClassesForEnrollment(), getReportsForSubject("STUDENT", id)]);
+    const [s, c, reports, scores] = await Promise.all([getStudent(id), getClassesForEnrollment(), getReportsForSubject("STUDENT", id), getStudentExamScores(id)]);
     setStudent(s);
     setClasses(c);
     setStudentReports(reports);
+    setExamScores(scores);
     setForm({
       firstName: s.firstName, lastName: s.lastName, age: String(s.age),
       phone: s.phone ?? "", email: s.email ?? "", education: s.education,
@@ -77,6 +81,13 @@ export default function StudentProfilePage() {
   }
 
   useEffect(() => { load(); }, [id]);
+
+  function handleMarkDone(reportId: string, done: boolean) {
+    startTransition(async () => {
+      await markReportDone(reportId, done);
+      load();
+    });
+  }
 
   function handleSave() {
     setError("");
@@ -469,10 +480,72 @@ export default function StudentProfilePage() {
         </div>
       )}
 
+      {/* Exam Scores */}
+      {examScores.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mt-6">
+          <h2 className="text-base font-semibold text-gray-800 mb-4">Exam Scores</h2>
+          {(() => {
+            const finalExams = examScores.filter(s => s.exam.examType === "FINAL");
+            const regularExams = examScores.filter(s => s.exam.examType === "REGULAR");
+            return (
+              <div className="space-y-5">
+                {finalExams.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-purple-700 uppercase tracking-wider mb-2">Final Exams</p>
+                    <div className="space-y-2">
+                      {finalExams.map(s => (
+                        <div key={s.id} className="flex items-center justify-between bg-purple-50 border border-purple-100 rounded-lg px-4 py-3">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{s.exam.title}</p>
+                            <p className="text-xs text-gray-400">
+                              {s.exam.courseClass.courseTemplate.name} · {new Date(s.exam.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-bold text-purple-700">{s.score}</p>
+                            {s.exam.scoringFinalized && <p className="text-xs text-gray-400">Finalized</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {regularExams.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-2">Regular Exams</p>
+                    <div className="space-y-2">
+                      {regularExams.map(s => (
+                        <div key={s.id} className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{s.exam.title}</p>
+                            <p className="text-xs text-gray-400">
+                              {s.exam.courseClass.courseTemplate.name} · {new Date(s.exam.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                              {s.exam.classMonth != null && ` · Month ${s.exam.classMonth}`}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-bold text-blue-700">{s.score}</p>
+                            {s.exam.scoringFinalized && <p className="text-xs text-gray-400">Finalized</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {/* Reports */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mt-6">
         <h2 className="text-base font-semibold text-gray-800 mb-4">Reports</h2>
-        <ReportsSection reports={studentReports as Parameters<typeof ReportsSection>[0]["reports"]} />
+        <ReportsSection
+          reports={studentReports as Parameters<typeof ReportsSection>[0]["reports"]}
+          onMarkDone={handleMarkDone}
+          isPending={isPending}
+        />
       </div>
     </div>
   );

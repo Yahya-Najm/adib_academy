@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireManager } from "./guard";
+import { generateClassId } from "@/lib/generateClassId";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -84,8 +85,11 @@ export async function createClass(data: {
   if (data.sections.some(s => !s.teacherId))
     throw new Error("Each section must have a teacher assigned");
 
+  const classId = await generateClassId(template.name);
+
   return prisma.courseClass.create({
     data: {
+      classId,
       courseTemplateId: data.courseTemplateId,
       branchId,
       managerId,

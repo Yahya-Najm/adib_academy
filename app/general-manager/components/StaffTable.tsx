@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { deleteStaff } from "../actions/staff";
 
 interface StaffMember {
@@ -95,9 +96,15 @@ export default function StaffTable({ staff, onEdit, onRefresh }: Props) {
                 </td>
                 <td className="px-5 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">
+                    <Link
+                      href={`/general-manager/staff/${s.id}`}
+                      className="text-xs text-orange-600 hover:text-orange-700 font-medium px-2 py-1 rounded hover:bg-orange-50 transition-colors"
+                    >
+                      View
+                    </Link>
                     <button
                       onClick={() => onEdit(s)}
-                      className="text-xs text-orange-600 hover:text-orange-700 font-medium px-2 py-1 rounded hover:bg-orange-50 transition-colors"
+                      className="text-xs text-gray-600 hover:text-gray-700 font-medium px-2 py-1 rounded hover:bg-gray-100 transition-colors"
                     >
                       Edit
                     </button>

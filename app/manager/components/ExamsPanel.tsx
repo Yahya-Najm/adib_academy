@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { getExams, createExam, updateExam, deleteExam } from "../actions/exams";
+import { getTeachersForBranch } from "../actions/teachers";
 
 type Exam = Awaited<ReturnType<typeof getExams>>[number];
+type Teacher = Awaited<ReturnType<typeof getTeachersForBranch>>[number];
 
 interface Props {
   courseClassId: string;
@@ -13,12 +15,15 @@ interface Props {
 
 export default function ExamsPanel({ courseClassId, className, onClose }: Props) {
   const [exams, setExams] = useState<Exam[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [editId, setEditId] = useState<string | null>(null);
 
   // New exam form state
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
   const [description, setDescription] = useState("");
+  const [examType, setExamType] = useState<"REGULAR" | "FINAL">("REGULAR");
+  const [proctorId, setProctorId] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -33,14 +38,17 @@ export default function ExamsPanel({ courseClassId, className, onClose }: Props)
     setExams(await getExams(courseClassId));
   }
 
-  useEffect(() => { load(); }, [courseClassId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+    getTeachersForBranch().then(setTeachers).catch(() => {});
+  }, [courseClassId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true); setFormError("");
     try {
-      await createExam({ courseClassId, title, date, description });
-      setTitle(""); setDate(""); setDescription("");
+      await createExam({ courseClassId, title, date, description, examType, proctorId: proctorId || undefined });
+      setTitle(""); setDate(""); setDescription(""); setExamType("REGULAR"); setProctorId("");
       await load();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to add exam");
@@ -168,11 +176,23 @@ export default function ExamsPanel({ courseClassId, className, onClose }: Props)
                 type="date" value={date} onChange={e => setDate(e.target.value)} required
                 className={inputCls}
               />
-              <input
-                value={description} onChange={e => setDescription(e.target.value)}
-                className={inputCls} placeholder="Description (optional)"
-              />
+              <select value={examType} onChange={e => setExamType(e.target.value as "REGULAR" | "FINAL")} className={inputCls}>
+                <option value="REGULAR">Regular Exam</option>
+                <option value="FINAL">Final Exam</option>
+              </select>
             </div>
+            <input
+              value={description} onChange={e => setDescription(e.target.value)}
+              className={inputCls} placeholder="Description (optional)"
+            />
+            {teachers.length > 0 && (
+              <select value={proctorId} onChange={e => setProctorId(e.target.value)} className={inputCls}>
+                <option value="">Proctor (optional)</option>
+                {teachers.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            )}
             {formError && <p className="text-xs text-red-500">{formError}</p>}
             <button type="submit" disabled={saving}
               className="w-full bg-teal-600 hover:bg-teal-700 text-white rounded-lg py-2 text-sm font-medium transition-colors disabled:opacity-60"

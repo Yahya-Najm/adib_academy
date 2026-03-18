@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { requireGM } from "./guard";
+import { generateUserId } from "@/lib/generateUserId";
 
 export async function getStaff() {
   await requireGM();
@@ -25,8 +26,10 @@ export async function createStaff(
   const session = await requireGM();
   if (!name.trim() || !staffType.trim()) throw new Error("Name and staff type are required");
   const hashed = await bcrypt.hash(Math.random().toString(36) + Date.now(), 10);
+  const userId = await generateUserId(name);
   return prisma.user.create({
     data: {
+      userId,
       name: name.trim(),
       email: email.trim().toLowerCase() || null,
       password: hashed,
@@ -62,4 +65,37 @@ export async function updateStaff(
 export async function deleteStaff(id: string) {
   await requireGM();
   return prisma.user.delete({ where: { id } });
+}
+
+export async function getStaffProfileGM(staffId: string) {
+  await requireGM();
+
+  const staff = await prisma.user.findUnique({
+    where: { id: staffId },
+    select: {
+      id: true, name: true, userId: true, email: true, active: true,
+      staffType: true, monthlySalary: true, createdAt: true, branchId: true,
+      branch: { select: { name: true } },
+    },
+  });
+  if (!staff) throw new Error("Staff not found");
+
+  const [attendances, reports] = await Promise.all([
+    prisma.staffAttendance.findMany({
+      where: { userId: staffId },
+      orderBy: { date: "desc" },
+      take: 60,
+    }),
+    prisma.attendanceReport.findMany({
+      where: { subjectType: "STAFF", subjectId: staffId },
+      include: {
+        manager: { select: { name: true } },
+        branch: { select: { name: true } },
+        doneBy: { select: { name: true } },
+      },
+      orderBy: { date: "desc" },
+    }),
+  ]);
+
+  return { staff, attendances, reports };
 }

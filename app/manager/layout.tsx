@@ -4,6 +4,8 @@ const nav = [
   { label: "Overview", href: "/manager" },
   { label: "Classes", href: "/manager/classes" },
   { label: "Students", href: "/manager/students" },
+  { label: "Teachers", href: "/manager/teachers" },
+  { label: "Staff", href: "/manager/staff" },
   { label: "Attendance", href: "/manager/attendance" },
   { label: "Reports", href: "/manager/reports" },
   { label: "Transactions", href: "/manager/transactions" },
