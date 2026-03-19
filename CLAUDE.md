@@ -22,9 +22,9 @@ npm run lint
 
 ## Stack
 
-- **Next.js 16** — App Router
+- **Next.js 16** — App Router, `output: "standalone"` (Railway deployment)
 - **React 19**, **TypeScript**, **Tailwind CSS v4**
-- **Prisma 7** + **PostgreSQL** (Docker on port 5433)
+- **Prisma 7** + **PostgreSQL** (Docker on port 5433 locally; Railway plugin in production)
 - **Auth.js v5** (`next-auth@beta`) — credentials-based, JWT sessions
 
 ## Seed / Dev credentials
@@ -32,15 +32,28 @@ npm run lint
 Run `npx prisma db seed` to create the GM account:
 - Email: `gm@adibacademy.com` / Password: `admin123`
 
+## Deployment (Railway)
+
+Set these env vars in the Railway project dashboard:
+- `DATABASE_URL` — auto-injected by Railway's PostgreSQL plugin
+- `AUTH_SECRET` — generate with `openssl rand -base64 32`
+- `NEXTAUTH_URL` — your Railway public domain (e.g. `https://your-app.up.railway.app`)
+- `NODE_ENV=production`
+
 ## Architecture
+
+### Public home page
+`app/page.tsx` is a **public server component** — no auth required. It fetches `Branch`, `CourseTemplate`, and active `CourseClass` rows directly from Prisma and renders a landing page with navbar, hero, about stats, branches, courses, and class schedule sections. The navbar button is session-aware: shows "Go to Dashboard" for signed-in users (direct link to their role route) or "Login" for guests.
 
 ### Auth flow
 - `auth.ts` — NextAuth config (credentials provider, jwt/session callbacks)
 - `auth.config.ts` — edge-compatible config used by the proxy; contains the `authorized` callback for role-based route protection
-- `proxy.ts` — **Next.js 16 uses `proxy.ts`, not `middleware.ts`**; protects `/general-manager`, `/manager`, `/teacher` routes
-- `app/login/page.tsx` → on success → `app/dashboard/page.tsx` → redirects by role
+- `proxy.ts` — **Next.js 16 uses `proxy.ts`, not `middleware.ts`**; protects `/general-manager`, `/manager`, `/teacher`, `/dashboard`
+- `app/login/page.tsx` — **server component** that calls `auth()` first; redirects already-authenticated users straight to their role dashboard. Renders `app/login/LoginForm.tsx` (client component) for unauthenticated visitors.
+- `app/dashboard/page.tsx` — server component; reads session role and redirects to the correct role dashboard
 - `components/Providers.tsx` — wraps root layout with `SessionProvider`
 - `types/next-auth.d.ts` — extends `Session` and `JWT` with `role`, `id`, `branchId`
+- **No sign-up** — all accounts are created by the General Manager only.
 
 ### Dashboard layout system
 Each role has its own directory with a `layout.tsx` that feeds nav items into the shared
@@ -76,7 +89,7 @@ Branch
 │           └── MonthlyPayment[]  (one per month × durationMonths)
 ├── Product[]
 │   └── ProductSale[]
-├── Transaction[]
+├── Transaction[]  (type: INCOME|EXPENSE; sourceType: MANUAL|STUDENT_PAYMENT|PRODUCT_SALE|STAFF_SALARY|TEACHER_PAYMENT)
 ├── OfficialHoliday[]  (branchId=null means applies to all branches)
 ├── WeeklyHoliday[]    (branchId=null means applies to all branches; recurring by dayOfWeek)
 ├── StaffAttendance[]  (daily present/absent/late for STAFF role users)
@@ -219,6 +232,27 @@ Payment PDFs are generated via API routes (not server actions, because `@react-p
 - `GET /api/pdf/teacher-payment/[id]` → `TeacherPaymentPDF` component → PDF response
 
 PDF components live in `components/pdf/` and use `@react-pdf/renderer`.
+
+### Financial system
+
+`Transaction` is the central ledger for all real money movements. Every money event auto-creates a `Transaction` row atomically (inside `prisma.$transaction`):
+
+| Trigger | type | sourceType |
+|---------|------|------------|
+| `recordPayment()` — amount > 0 | INCOME | STUDENT_PAYMENT |
+| `recordSale()` | INCOME | PRODUCT_SALE |
+| `finalizeStaffPayment()` | EXPENSE | STAFF_SALARY |
+| `finalizeTeacherPayment()` | EXPENSE | TEACHER_PAYMENT |
+| Manual entry via transactions page | EXPENSE | MANUAL |
+
+- `trackingNumber` is nullable — required for MANUAL entries, null for system-generated ones.
+- `sourceId` links back to the originating record (paymentId, saleId, staffPaymentId, teacherPaymentId).
+- The existing `/manager/transactions` page filters to `sourceType=MANUAL` only (manual expense management).
+- Financial dashboards live at `/manager/financials` (branch-scoped) and `/general-manager/financials` (cross-branch with branch selector).
+- Shared source-type labels and ordering live in `lib/financialConstants.ts` — **not** in server action files (see constraint below).
+
+### `"use server"` constraint
+Files marked `"use server"` may **only** export async functions. Exporting plain objects, arrays, or constants from a `"use server"` file causes a runtime error. Move shared constants to a regular `lib/` file and import from there.
 
 ### Design conventions
 - White background (`bg-white`) for all pages; `bg-gray-50` for page content area
