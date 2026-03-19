@@ -9,7 +9,8 @@ type Report = {
   content: string | null;
   isAutomatic: boolean;
   createdAt: Date;
-  manager: { name: string };
+  manager?: { name: string } | null;
+  teacher?: { name: string } | null;
 };
 
 interface Props {
@@ -76,7 +77,7 @@ export default function ReportPanel({ date, subjectType, subjectId, reports, fin
           <div>
             <span className="font-medium text-gray-700 text-xs uppercase tracking-wide">{r.reportType}</span>
             <p className="text-gray-600 mt-0.5">{r.content}</p>
-            <p className="text-gray-400 text-xs mt-0.5">by {r.manager.name} · {new Date(r.createdAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</p>
+            <p className="text-gray-400 text-xs mt-0.5">by {r.manager?.name ?? r.teacher?.name ?? "Unknown"} · {new Date(r.createdAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</p>
           </div>
           {!finalized && (
             <button onClick={() => handleDelete(r.id)} disabled={isPending}

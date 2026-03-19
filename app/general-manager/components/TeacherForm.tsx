@@ -14,6 +14,7 @@ interface InitialTeacher {
   paymentType: string | null;
   perClassRate: number | null;
   revenuePercentage: number | null;
+  hourlyRate: number | null;
 }
 
 interface Props {
@@ -33,6 +34,7 @@ export default function TeacherForm({ branches, initial, onSuccess, onCancel }: 
     paymentType: initial?.paymentType ?? "PER_CLASS",
     perClassRate: initial?.perClassRate?.toString() ?? "",
     revenuePercentage: initial?.revenuePercentage?.toString() ?? "",
+    hourlyRate: initial?.hourlyRate?.toString() ?? "",
     active: initial?.active ?? true,
   });
   const [idSuffix] = useState(() => Math.random().toString(16).slice(2, 6));
@@ -53,10 +55,10 @@ export default function TeacherForm({ branches, initial, onSuccess, onCancel }: 
     setLoading(true); setError("");
     try {
       if (editing) {
-        await updateTeacher(initial.id, form.name, form.email, form.branchId, form.paymentType, form.perClassRate, form.revenuePercentage, form.active, form.password || undefined);
+        await updateTeacher(initial.id, form.name, form.email, form.branchId, form.paymentType, form.perClassRate, form.revenuePercentage, form.hourlyRate, form.active, form.password || undefined);
       } else {
-        await createTeacher(form.name, form.email, form.password, form.branchId, form.paymentType, form.perClassRate, form.revenuePercentage);
-        setForm({ name: "", email: "", password: "", branchId: "", paymentType: "PER_CLASS", perClassRate: "", revenuePercentage: "", active: true });
+        await createTeacher(form.name, form.email, form.password, form.branchId, form.paymentType, form.perClassRate, form.revenuePercentage, form.hourlyRate);
+        setForm({ name: "", email: "", password: "", branchId: "", paymentType: "PER_CLASS", perClassRate: "", revenuePercentage: "", hourlyRate: "", active: true });
       }
       onSuccess();
     } catch (err) {
@@ -115,13 +117,14 @@ export default function TeacherForm({ branches, initial, onSuccess, onCancel }: 
             value={form.paymentType} onChange={e => field("paymentType", e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
           >
-            <option value="PER_CLASS">Per Class — fixed rate per class taught</option>
+            <option value="PER_CLASS">Per Section — fixed rate per section taught</option>
             <option value="REVENUE_PERCENTAGE">Revenue Percentage — % of student fees per class</option>
+            <option value="FIXED_HOURS">Fixed Hours — hourly rate per section taught (1 hr each)</option>
           </select>
         </div>
         {form.paymentType === "PER_CLASS" && (
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Rate per Class ($)</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Rate per Section ($)</label>
             <input
               type="number" min="0" step="0.01" value={form.perClassRate}
               onChange={e => field("perClassRate", e.target.value)}
@@ -135,6 +138,16 @@ export default function TeacherForm({ branches, initial, onSuccess, onCancel }: 
             <input
               type="number" min="0" max="100" step="0.01" value={form.revenuePercentage}
               onChange={e => field("revenuePercentage", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
+            />
+          </div>
+        )}
+        {form.paymentType === "FIXED_HOURS" && (
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Hourly Rate ($)</label>
+            <input
+              type="number" min="0" step="0.01" value={form.hourlyRate}
+              onChange={e => field("hourlyRate", e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
             />
           </div>

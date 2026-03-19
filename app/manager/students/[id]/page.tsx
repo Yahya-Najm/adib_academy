@@ -53,6 +53,7 @@ export default function StudentProfilePage() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
   const [enrollClassId, setEnrollClassId] = useState("");
+  const [enrollSectionId, setEnrollSectionId] = useState("");
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -122,12 +123,13 @@ export default function StudentProfilePage() {
   }
 
   function handleEnroll() {
-    if (!enrollClassId) return;
+    if (!enrollClassId || !enrollSectionId) return;
     setError("");
     startTransition(async () => {
       try {
-        await enrollStudent(id, enrollClassId);
+        await enrollStudent(id, enrollClassId, enrollSectionId);
         setEnrollClassId("");
+        setEnrollSectionId("");
         load();
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Failed to enroll");
@@ -366,11 +368,11 @@ export default function StudentProfilePage() {
       {unenrolledClasses.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-6">
           <h2 className="text-base font-semibold text-gray-800 mb-4">Enroll in a Class</h2>
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <select
               value={enrollClassId}
-              onChange={e => setEnrollClassId(e.target.value)}
-              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              onChange={e => { setEnrollClassId(e.target.value); setEnrollSectionId(""); }}
+              className="flex-1 min-w-[200px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             >
               <option value="">Select a class...</option>
               {unenrolledClasses.map(c => (
@@ -379,9 +381,27 @@ export default function StudentProfilePage() {
                 </option>
               ))}
             </select>
+            {enrollClassId && (() => {
+              const selectedClass = unenrolledClasses.find(c => c.id === enrollClassId);
+              const sections = selectedClass?.sections ?? [];
+              return (
+                <select
+                  value={enrollSectionId}
+                  onChange={e => setEnrollSectionId(e.target.value)}
+                  className="flex-1 min-w-[160px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                >
+                  <option value="">Select a section...</option>
+                  {sections.map(s => (
+                    <option key={s.id} value={s.id}>
+                      Section {s.sectionNumber}{s.sectionName ? ` — ${s.sectionName}` : ""} ({s.teacher.name})
+                    </option>
+                  ))}
+                </select>
+              );
+            })()}
             <button
               onClick={handleEnroll}
-              disabled={!enrollClassId || isPending}
+              disabled={!enrollClassId || !enrollSectionId || isPending}
               className="bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
             >
               Enroll

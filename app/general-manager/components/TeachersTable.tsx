@@ -15,6 +15,7 @@ interface Teacher {
   paymentType: PaymentType | null;
   perClassRate: number | null;
   revenuePercentage: number | null;
+  hourlyRate: number | null;
   createdAt: Date;
 }
 
@@ -25,8 +26,9 @@ interface Props {
 }
 
 function paymentLabel(t: Teacher) {
-  if (t.paymentType === "PER_CLASS") return t.perClassRate != null ? `$${t.perClassRate}/class` : "Per class";
+  if (t.paymentType === "PER_CLASS") return t.perClassRate != null ? `$${t.perClassRate}/section` : "Per section";
   if (t.paymentType === "REVENUE_PERCENTAGE") return t.revenuePercentage != null ? `${t.revenuePercentage}% of revenue` : "% of revenue";
+  if (t.paymentType === "FIXED_HOURS") return t.hourlyRate != null ? `$${t.hourlyRate}/hr` : "Hourly";
   return "—";
 }
 

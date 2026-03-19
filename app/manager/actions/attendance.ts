@@ -65,7 +65,7 @@ export async function getStaffAttendanceContext(dateStr: string) {
 
   const reports = await prisma.attendanceReport.findMany({
     where: { branchId, date, subjectType: "STAFF" },
-    include: { manager: { select: { name: true } } },
+    include: { manager: { select: { name: true } }, teacher: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   });
 
@@ -195,7 +195,7 @@ export async function getTeacherAttendanceContext(dateStr: string) {
   const teacherIds = [...new Set(activeClasses.flatMap(c => c.sections.map(s => s.teacher.id)))];
   const reports = await prisma.attendanceReport.findMany({
     where: { branchId, date, subjectType: "TEACHER", subjectId: { in: teacherIds } },
-    include: { manager: { select: { name: true } } },
+    include: { manager: { select: { name: true } }, teacher: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   });
 
@@ -326,10 +326,16 @@ export async function getStudentAttendanceContext(dateStr: string) {
     where: { branchId, status: "ACTIVE" },
     include: {
       courseTemplate: { select: { name: true } },
-      courseEnrollments: {
-        where: { status: "ACTIVE" },
-        include: { student: { select: { id: true, firstName: true, lastName: true, studentId: true } } },
-        orderBy: { enrolledAt: "asc" },
+      sections: {
+        include: {
+          teacher: { select: { id: true, name: true } },
+          studentEnrollments: {
+            where: { status: "ACTIVE" },
+            include: { student: { select: { id: true, firstName: true, lastName: true, studentId: true } } },
+            orderBy: { enrolledAt: "asc" },
+          },
+        },
+        orderBy: { sectionNumber: "asc" },
       },
     },
     orderBy: { createdAt: "desc" },
@@ -344,46 +350,57 @@ export async function getStudentAttendanceContext(dateStr: string) {
   const classHolidayMap = Object.fromEntries(classHolidays.map(ch => [ch.courseClassId, ch.reason]));
 
   const classIds = activeClasses.map(c => c.id);
-  const studentIds = activeClasses.flatMap(c => c.courseEnrollments.map(e => e.student.id));
+  const sectionIds = activeClasses.flatMap(c => c.sections.map(s => s.id));
+  const studentIds = activeClasses.flatMap(c => c.sections.flatMap(s => s.studentEnrollments.map(e => e.student.id)));
 
   const records = await prisma.studentAttendance.findMany({
     where: { courseClassId: { in: classIds }, date },
-    select: { courseClassId: true, studentId: true, present: true, isLate: true },
+    select: { classSectionId: true, studentId: true, present: true, isLate: true },
   });
 
   const reports = await prisma.attendanceReport.findMany({
     where: { branchId, date, subjectType: { in: ["STUDENT", "CLASS"] }, subjectId: { in: [...studentIds, ...classIds] } },
-    include: { manager: { select: { name: true } } },
+    include: { manager: { select: { name: true } }, teacher: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   });
 
-  // Per-class finalization status
+  // Per-section finalization — scopeId is classSectionId for CLASS type
   const finalizations = await prisma.attendanceFinalization.findMany({
-    where: { branchId, date, finalizationType: "CLASS" },
+    where: { branchId, date, finalizationType: "CLASS", scopeId: { in: sectionIds } },
   });
-  const finalizedClassIds = new Set(finalizations.map(f => f.scopeId));
+  const finalizedSectionIds = new Set(finalizations.map(f => f.scopeId));
+  const teacherFinalizedSectionIds = new Set(finalizations.filter(f => f.teacherId).map(f => f.scopeId));
 
-  return { classes: activeClasses, classHolidayMap, records, reports, holidayLabel, finalizedClassIds: [...finalizedClassIds], date: dateStr };
+  return {
+    classes: activeClasses,
+    classHolidayMap,
+    records,
+    reports,
+    holidayLabel,
+    finalizedSectionIds: [...finalizedSectionIds],
+    teacherFinalizedSectionIds: [...teacherFinalizedSectionIds],
+    date: dateStr,
+  };
 }
 
-export async function finalizeClassAttendance(courseClassId: string, dateStr: string) {
+export async function finalizeClassAttendance(classSectionId: string, dateStr: string) {
   const { id: managerId, branchId } = await getManagerInfo();
   if (!branchId) throw new Error("No branch assigned");
 
   const date = new Date(dateStr);
 
-  const cls = await prisma.courseClass.findUnique({
-    where: { id: courseClassId },
+  const section = await prisma.classSection.findUnique({
+    where: { id: classSectionId },
     include: {
-      courseEnrollments: { where: { status: "ACTIVE" }, select: { studentId: true } },
+      courseClass: true,
+      studentEnrollments: { where: { status: "ACTIVE" }, select: { studentId: true } },
     },
   });
-  if (!cls || cls.branchId !== branchId) throw new Error("Class not found");
+  if (!section || section.courseClass.branchId !== branchId) throw new Error("Section not found");
 
-  // All enrolled students must have attendance recorded
-  const enrolled = cls.courseEnrollments.map(e => e.studentId);
+  const enrolled = section.studentEnrollments.map(e => e.studentId);
   const records = await prisma.studentAttendance.findMany({
-    where: { courseClassId, date },
+    where: { classSectionId, date },
     select: { studentId: true },
   });
   const recordedIds = new Set(records.map(r => r.studentId));
@@ -394,18 +411,18 @@ export async function finalizeClassAttendance(courseClassId: string, dateStr: st
       where: { id: { in: missing } },
       select: { firstName: true, lastName: true },
     });
-    const names = students.map(s => `${s.firstName} ${s.lastName}`).join(", ");
-    throw new Error(`Attendance not recorded for: ${names}`);
+    throw new Error(`Attendance not recorded for: ${students.map(s => `${s.firstName} ${s.lastName}`).join(", ")}`);
   }
 
-  const existing = await getScopeFinalization(date, branchId, "CLASS", courseClassId);
+  const existing = await getScopeFinalization(date, branchId, "CLASS", classSectionId);
   if (existing) throw new Error("Already finalized");
 
-  return createScopeFinalization(date, branchId, managerId, "CLASS", courseClassId);
+  return createScopeFinalization(date, branchId, managerId, "CLASS", classSectionId);
 }
 
 export async function upsertStudentAttendance(data: {
   courseClassId: string;
+  classSectionId: string;
   studentId: string;
   date: string;
   present: boolean;
@@ -416,9 +433,8 @@ export async function upsertStudentAttendance(data: {
 
   const date = new Date(data.date);
 
-  // Block if this class's attendance is finalized for this day
-  const fin = await getScopeFinalization(date, branchId, "CLASS", data.courseClassId);
-  if (fin) throw new Error("This class's attendance for this day has been finalized");
+  const fin = await getScopeFinalization(date, branchId, "CLASS", data.classSectionId);
+  if (fin) throw new Error("This section's attendance for this day has been finalized");
 
   const holidayLabel = await getDateHolidayLabel(date, branchId);
   if (holidayLabel) throw new Error(`Cannot record attendance on a holiday: ${holidayLabel}`);
@@ -437,12 +453,12 @@ export async function upsertStudentAttendance(data: {
   const enrollment = await prisma.courseEnrollment.findUnique({
     where: { studentId_courseClassId: { studentId: data.studentId, courseClassId: data.courseClassId } },
   });
-  if (!enrollment || enrollment.status !== "ACTIVE")
-    throw new Error("Student is not actively enrolled in this class");
+  if (!enrollment || enrollment.status !== "ACTIVE" || enrollment.classSectionId !== data.classSectionId)
+    throw new Error("Student is not actively enrolled in this section");
 
   const record = await prisma.studentAttendance.upsert({
-    where: { courseClassId_studentId_date: { courseClassId: data.courseClassId, studentId: data.studentId, date } },
-    create: { courseClassId: data.courseClassId, studentId: data.studentId, date, present: data.present, isLate: data.isLate },
+    where: { classSectionId_studentId_date: { classSectionId: data.classSectionId, studentId: data.studentId, date } },
+    create: { courseClassId: data.courseClassId, classSectionId: data.classSectionId, studentId: data.studentId, date, present: data.present, isLate: data.isLate },
     update: { present: data.present, isLate: data.isLate },
   });
 

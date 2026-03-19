@@ -15,7 +15,8 @@ type Report = {
   doneAt?: Date | string | null;
   doneBy?: { name: string } | null;
   createdAt: Date | string;
-  manager: { name: string };
+  manager?: { name: string } | null;
+  teacher?: { name: string } | null;
   branch?: { name: string };
 };
 
@@ -23,6 +24,12 @@ interface Props {
   reports: Report[];
   onMarkDone?: (id: string, done: boolean) => void;
   isPending?: boolean;
+}
+
+function authorLabel(r: Report) {
+  if (r.teacher) return { name: r.teacher.name, badge: "Teacher" };
+  if (r.manager) return { name: r.manager.name, badge: "Manager" };
+  return { name: "Unknown", badge: "Manager" };
 }
 
 function reportTypeColor(t: string) {
@@ -63,69 +70,81 @@ export default function ReportsSection({ reports, onMarkDone, isPending }: Props
 
           {expandedActionable && (
             <div className="space-y-2">
-              {/* Pending first */}
-              {pendingActions.map(r => (
-                <div key={r.id} className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="text-xs text-gray-500 font-medium">
-                          {new Date(r.date as string).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                        </span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${reportTypeColor(r.reportType)}`}>
-                          {r.reportType}
-                        </span>
-                        {r.branch && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{r.branch.name}</span>}
+              {pendingActions.map(r => {
+                const author = authorLabel(r);
+                return (
+                  <div key={r.id} className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className="text-xs text-gray-500 font-medium">
+                            {new Date(r.date as string).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                          </span>
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${reportTypeColor(r.reportType)}`}>
+                            {r.reportType}
+                          </span>
+                          {r.branch && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{r.branch.name}</span>}
+                        </div>
+                        {r.actionDescription && (
+                          <p className="text-xs font-semibold text-orange-700 mb-1">Action: {r.actionDescription}</p>
+                        )}
+                        {r.content && <p className="text-sm text-gray-700">{r.content}</p>}
+                        <p className="text-xs text-gray-400 mt-1">
+                          by {author.name}
+                          <span className={`ml-1 text-xs px-1.5 py-0.5 rounded ${author.badge === "Teacher" ? "bg-purple-50 text-purple-600" : "bg-teal-50 text-teal-600"}`}>
+                            {author.badge}
+                          </span>
+                        </p>
                       </div>
-                      {r.actionDescription && (
-                        <p className="text-xs font-semibold text-orange-700 mb-1">Action: {r.actionDescription}</p>
+                      {onMarkDone && (
+                        <button onClick={() => onMarkDone(r.id, true)} disabled={isPending}
+                          className="shrink-0 bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap">
+                          Mark Done
+                        </button>
                       )}
-                      {r.content && <p className="text-sm text-gray-700">{r.content}</p>}
-                      <p className="text-xs text-gray-400 mt-1">by {r.manager.name}</p>
                     </div>
-                    {onMarkDone && (
-                      <button onClick={() => onMarkDone(r.id, true)} disabled={isPending}
-                        className="shrink-0 bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap">
-                        Mark Done
-                      </button>
-                    )}
                   </div>
-                </div>
-              ))}
-              {/* Done */}
-              {doneActions.map(r => (
-                <div key={r.id} className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 opacity-75">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="text-xs text-gray-500 font-medium">
-                          {new Date(r.date as string).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                        </span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${reportTypeColor(r.reportType)}`}>
-                          {r.reportType}
-                        </span>
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">Done</span>
-                        {r.branch && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{r.branch.name}</span>}
+                );
+              })}
+              {doneActions.map(r => {
+                const author = authorLabel(r);
+                return (
+                  <div key={r.id} className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 opacity-75">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className="text-xs text-gray-500 font-medium">
+                            {new Date(r.date as string).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                          </span>
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${reportTypeColor(r.reportType)}`}>
+                            {r.reportType}
+                          </span>
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">Done</span>
+                          {r.branch && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{r.branch.name}</span>}
+                        </div>
+                        {r.actionDescription && (
+                          <p className="text-xs text-gray-500 mb-1">Action: {r.actionDescription}</p>
+                        )}
+                        {r.content && <p className="text-sm text-gray-600">{r.content}</p>}
+                        <p className="text-xs text-gray-400 mt-1">
+                          by {author.name}
+                          <span className={`ml-1 text-xs px-1.5 py-0.5 rounded ${author.badge === "Teacher" ? "bg-purple-50 text-purple-600" : "bg-teal-50 text-teal-600"}`}>
+                            {author.badge}
+                          </span>
+                          {r.doneBy && ` · Resolved by ${r.doneBy.name}`}
+                          {r.doneAt && ` on ${new Date(r.doneAt as string).toLocaleDateString("en-GB")}`}
+                        </p>
                       </div>
-                      {r.actionDescription && (
-                        <p className="text-xs text-gray-500 mb-1">Action: {r.actionDescription}</p>
+                      {onMarkDone && (
+                        <button onClick={() => onMarkDone(r.id, false)} disabled={isPending}
+                          className="shrink-0 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap">
+                          Reopen
+                        </button>
                       )}
-                      {r.content && <p className="text-sm text-gray-600">{r.content}</p>}
-                      <p className="text-xs text-gray-400 mt-1">
-                        by {r.manager.name}
-                        {r.doneBy && ` · Resolved by ${r.doneBy.name}`}
-                        {r.doneAt && ` on ${new Date(r.doneAt as string).toLocaleDateString("en-GB")}`}
-                      </p>
                     </div>
-                    {onMarkDone && (
-                      <button onClick={() => onMarkDone(r.id, false)} disabled={isPending}
-                        className="shrink-0 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap">
-                        Reopen
-                      </button>
-                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -162,24 +181,32 @@ function SimpleReportList({ reports }: { reports: Report[] }) {
 
   return (
     <div className="space-y-2">
-      {visible.map(r => (
-        <div key={r.id} className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-gray-500 font-medium">
-                {new Date(r.date as string).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+      {visible.map(r => {
+        const author = authorLabel(r);
+        return (
+          <div key={r.id} className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-500 font-medium">
+                  {new Date(r.date as string).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                </span>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${reportTypeColor(r.reportType)}`}>
+                  {r.reportType}
+                </span>
+                {r.isAutomatic && <span className="text-xs text-gray-400 italic">auto</span>}
+                {r.branch && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{r.branch.name}</span>}
+              </div>
+              <span className="text-xs text-gray-400 shrink-0 flex items-center gap-1">
+                by {author.name}
+                <span className={`text-xs px-1.5 py-0.5 rounded ${author.badge === "Teacher" ? "bg-purple-50 text-purple-600" : "bg-teal-50 text-teal-600"}`}>
+                  {author.badge}
+                </span>
               </span>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${reportTypeColor(r.reportType)}`}>
-                {r.reportType}
-              </span>
-              {r.isAutomatic && <span className="text-xs text-gray-400 italic">auto</span>}
-              {r.branch && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{r.branch.name}</span>}
             </div>
-            <span className="text-xs text-gray-400 shrink-0">by {r.manager.name}</span>
+            {r.content && <p className="text-sm text-gray-700 mt-1.5">{r.content}</p>}
           </div>
-          {r.content && <p className="text-sm text-gray-700 mt-1.5">{r.content}</p>}
-        </div>
-      ))}
+        );
+      })}
       {reports.length > 5 && (
         <button onClick={() => setExpanded(e => !e)}
           className="text-sm text-teal-600 hover:text-teal-800 font-medium">

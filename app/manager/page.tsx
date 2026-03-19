@@ -5,11 +5,13 @@ import Link from "next/link";
 import { getPaymentNotifications } from "./actions/notifications";
 import { getReportCountsForDate, getPendingActionableReports } from "./actions/reports";
 import { getExamNotifications } from "./actions/exams";
+import { getStaffPaymentAlerts } from "./actions/staffPayments";
 
 type PaymentNotif = Awaited<ReturnType<typeof getPaymentNotifications>>[number];
 type ReportCounts = Awaited<ReturnType<typeof getReportCountsForDate>>;
 type ExamNotif = Awaited<ReturnType<typeof getExamNotifications>>[number];
 type ActionableReport = Awaited<ReturnType<typeof getPendingActionableReports>>[number];
+type StaffAlert = Awaited<ReturnType<typeof getStaffPaymentAlerts>>[number];
 
 function toDateStr(d: Date) { return d.toISOString().slice(0, 10); }
 
@@ -20,16 +22,19 @@ export default function ManagerPage() {
   const [reportDate, setReportDate] = useState(toDateStr(new Date()));
   const [examNotifs, setExamNotifs] = useState<ExamNotif[]>([]);
   const [pendingActions, setPendingActions] = useState<ActionableReport[]>([]);
+  const [staffAlerts, setStaffAlerts] = useState<StaffAlert[]>([]);
 
   useEffect(() => {
     Promise.all([
       getPaymentNotifications(),
       getExamNotifications(),
       getPendingActionableReports(),
-    ]).then(([notifs, exams, actions]) => {
+      getStaffPaymentAlerts(),
+    ]).then(([notifs, exams, actions, staffPay]) => {
       setNotifications(notifs);
       setExamNotifs(exams);
       setPendingActions(actions);
+      setStaffAlerts(staffPay);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -105,6 +110,66 @@ export default function ManagerPage() {
         </div>
       )}
 
+      {/* ── Staff Payment Alerts ── */}
+      {staffAlerts.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-gray-800">
+              Staff Salary Alerts
+              <span className="ml-2 inline-flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5">
+                {staffAlerts.length}
+              </span>
+            </h2>
+            <Link href="/manager/payments" className="text-sm text-teal-600 hover:text-teal-800 font-medium">
+              View Payments
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {staffAlerts.map(alert => (
+              <div
+                key={alert.userId}
+                className={`border rounded-xl px-5 py-4 flex items-center justify-between gap-4 ${
+                  alert.isOverdue
+                    ? "bg-red-50 border-red-200"
+                    : "bg-amber-50 border-amber-200"
+                }`}
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-gray-900">{alert.name}</p>
+                    {alert.userSlug && (
+                      <span className="font-mono text-xs text-gray-400">{alert.userSlug}</span>
+                    )}
+                    <span className="text-xs text-gray-500 bg-white bg-opacity-60 px-2 py-0.5 rounded-full">
+                      {alert.role === "MANAGER" ? "Manager" : alert.staffType ?? "Staff"}
+                    </span>
+                    {alert.existingPaymentStatus && (
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                        {alert.existingPaymentStatus === "PDF_GENERATED" ? "PDF Ready — pending sign" : alert.existingPaymentStatus}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    Salary: ${alert.monthlySalary.toFixed(2)} · Due:{" "}
+                    {alert.dueDate.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    {alert.isOverdue
+                      ? ` — overdue by ${Math.abs(alert.daysUntil)} day${Math.abs(alert.daysUntil) !== 1 ? "s" : ""}`
+                      : alert.daysUntil === 0 ? " — due today"
+                      : ` — in ${alert.daysUntil} day${alert.daysUntil !== 1 ? "s" : ""}`}
+                  </p>
+                </div>
+                <Link
+                  href={`/manager/payments/staff/${alert.userId}`}
+                  className="shrink-0 text-xs text-teal-600 hover:text-teal-800 font-medium border border-teal-200 px-3 py-1.5 rounded-lg bg-white"
+                >
+                  Process Payment
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Pending Actionable Reports ── */}
       {pendingActions.length > 0 && (
         <div className="mt-8">
@@ -136,7 +201,7 @@ export default function ManagerPage() {
                       <p className="text-sm font-semibold text-orange-800">{r.actionDescription}</p>
                     )}
                     {r.content && <p className="text-sm text-gray-700">{r.content}</p>}
-                    <p className="text-xs text-gray-400 mt-1">by {r.manager.name}</p>
+                    <p className="text-xs text-gray-400 mt-1">by {r.manager?.name ?? r.teacher?.name ?? "Unknown"}</p>
                   </div>
                 </div>
               </div>

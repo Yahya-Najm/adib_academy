@@ -93,6 +93,7 @@ export async function getReportsByDate(dateStr: string, subjectType?: string, re
     },
     include: {
       manager: { select: { name: true } },
+      teacher: { select: { name: true } },
       doneBy: { select: { name: true } },
     },
     orderBy: { createdAt: "asc" },
@@ -109,7 +110,7 @@ export async function getPendingActionableReports() {
 
   const reports = await prisma.attendanceReport.findMany({
     where: { branchId, reportKind: "ACTIONABLE", isDone: false },
-    include: { manager: { select: { name: true } } },
+    include: { manager: { select: { name: true } }, teacher: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   });
 
@@ -126,6 +127,7 @@ export async function getReportsForSubject(subjectType: "STAFF" | "TEACHER" | "S
     where: { branchId, subjectType, subjectId },
     include: {
       manager: { select: { name: true } },
+      teacher: { select: { name: true } },
       doneBy: { select: { name: true } },
     },
     orderBy: { date: "desc" },

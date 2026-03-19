@@ -13,6 +13,7 @@ export async function getReportsForSubjectGM(
     where: { subjectType, subjectId },
     include: {
       manager: { select: { name: true } },
+      teacher: { select: { name: true } },
       branch: { select: { name: true } },
       doneBy: { select: { name: true } },
     },
@@ -72,6 +73,7 @@ export async function getAllActionableReportsGM(branchId?: string, onlyPending?:
     },
     include: {
       manager: { select: { name: true } },
+      teacher: { select: { name: true } },
       branch: { select: { name: true } },
       doneBy: { select: { name: true } },
     },
@@ -131,6 +133,7 @@ export async function getAllReportsGM(opts: {
     },
     include: {
       manager: { select: { name: true } },
+      teacher: { select: { name: true } },
       branch: { select: { name: true } },
       doneBy: { select: { name: true } },
     },

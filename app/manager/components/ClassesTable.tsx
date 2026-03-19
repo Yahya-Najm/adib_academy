@@ -19,6 +19,7 @@ interface ClassSection {
 
 interface CourseClass {
   id: string;
+  classId: string | null;
   courseTemplateId: string;
   branchId: string;
   managerId: string;

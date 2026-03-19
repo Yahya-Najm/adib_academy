@@ -13,7 +13,7 @@ export async function getTeachers() {
       id: true, name: true, email: true, active: true,
       branchId: true,
       branch: { select: { name: true } },
-      paymentType: true, perClassRate: true, revenuePercentage: true, createdAt: true,
+      paymentType: true, perClassRate: true, revenuePercentage: true, hourlyRate: true, createdAt: true,
     },
     orderBy: { createdAt: "desc" },
   });
@@ -21,12 +21,12 @@ export async function getTeachers() {
 
 export async function createTeacher(
   name: string, email: string, password: string, branchId: string,
-  paymentType: string, perClassRate: string, revenuePercentage: string,
+  paymentType: string, perClassRate: string, revenuePercentage: string, hourlyRate: string,
 ) {
   const session = await requireGM();
   if (!name.trim() || !email.trim() || !password || !paymentType)
     throw new Error("Name, email, password and payment type are required");
-  if (!["PER_CLASS", "REVENUE_PERCENTAGE"].includes(paymentType))
+  if (!["PER_CLASS", "REVENUE_PERCENTAGE", "FIXED_HOURS"].includes(paymentType))
     throw new Error("Invalid payment type for teacher");
   const hashed = await bcrypt.hash(password, 10);
   const userId = await generateUserId(name);
@@ -38,9 +38,10 @@ export async function createTeacher(
       password: hashed,
       role: "TEACHER",
       branchId: branchId || null,
-      paymentType: paymentType as "PER_CLASS" | "REVENUE_PERCENTAGE",
+      paymentType: paymentType as "PER_CLASS" | "REVENUE_PERCENTAGE" | "FIXED_HOURS",
       perClassRate: paymentType === "PER_CLASS" && perClassRate ? Number(perClassRate) : null,
       revenuePercentage: paymentType === "REVENUE_PERCENTAGE" && revenuePercentage ? Number(revenuePercentage) : null,
+      hourlyRate: paymentType === "FIXED_HOURS" && hourlyRate ? Number(hourlyRate) : null,
       createdBy: session.user.id,
     },
   });
@@ -48,12 +49,12 @@ export async function createTeacher(
 
 export async function updateTeacher(
   id: string, name: string, email: string, branchId: string,
-  paymentType: string, perClassRate: string, revenuePercentage: string,
+  paymentType: string, perClassRate: string, revenuePercentage: string, hourlyRate: string,
   active: boolean, newPassword?: string,
 ) {
   await requireGM();
   if (!name.trim() || !email.trim()) throw new Error("Name and email are required");
-  if (!["PER_CLASS", "REVENUE_PERCENTAGE"].includes(paymentType))
+  if (!["PER_CLASS", "REVENUE_PERCENTAGE", "FIXED_HOURS"].includes(paymentType))
     throw new Error("Invalid payment type");
   const data: Record<string, unknown> = {
     name: name.trim(),
@@ -62,6 +63,7 @@ export async function updateTeacher(
     paymentType,
     perClassRate: paymentType === "PER_CLASS" && perClassRate ? Number(perClassRate) : null,
     revenuePercentage: paymentType === "REVENUE_PERCENTAGE" && revenuePercentage ? Number(revenuePercentage) : null,
+    hourlyRate: paymentType === "FIXED_HOURS" && hourlyRate ? Number(hourlyRate) : null,
     active,
   };
   if (newPassword) data.password = await bcrypt.hash(newPassword, 10);
@@ -80,7 +82,7 @@ export async function getTeacherProfileGM(teacherId: string) {
     where: { id: teacherId },
     select: {
       id: true, name: true, userId: true, email: true, active: true,
-      paymentType: true, perClassRate: true, revenuePercentage: true,
+      paymentType: true, perClassRate: true, revenuePercentage: true, hourlyRate: true,
       createdAt: true, branchId: true,
       branch: { select: { name: true } },
     },

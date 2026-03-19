@@ -12,7 +12,21 @@
       "Bash(ls /e/adib/adib_acadmey/app/manager/classes/[id])",
       "Bash(npx prisma:*)",
       "Bash(rm:*)",
-      "Bash(2)"
+      "Bash(2)",
+      "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\teacher\\\\classes\\\\[id]\")",
+      "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\teacher\\\\students\\\\[id]\")",
+      "Bash(grep -n \"r\\\\.manager\\\\.name\\\\|r\\\\.manager\\\\.name\" app/general-manager/reports/page.tsx app/manager/reports/page.tsx app/manager/page.tsx app/manager/students/[id]/page.tsx)",
+      "Bash(cd:*)",
+      "Bash(PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=\"resent the db\" npx prisma db push --force-reset 2>&1)",
+      "Bash(npx tsx:*)",
+      "Bash(grep -r \"pdf\\\\|PDF\\\\|pdfkit\\\\|html-to-pdf\\\\|puppeteer\" E:/adib/adib_acadmey --include=*.ts --include=*.tsx --include=*.json)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(npm install:*)",
+      "Bash(npm list:*)",
+      "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\api\\\\pdf\\\\staff-payment\\\\[id]\")",
+      "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\api\\\\pdf\\\\teacher-payment\\\\[id]\")",
+      "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\manager\\\\payments\\\\staff\\\\[id]\")",
+      "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\manager\\\\payments\\\\teachers\\\\[id]\")"
     ]
   }
 }

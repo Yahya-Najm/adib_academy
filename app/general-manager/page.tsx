@@ -106,7 +106,7 @@ export default function GeneralManagerPage() {
                 )}
                 {r.actionDescription && <p className="text-sm font-semibold text-orange-800">{r.actionDescription}</p>}
                 {r.content && <p className="text-sm text-gray-700">{r.content}</p>}
-                <p className="text-xs text-gray-400 mt-1">by {r.manager.name}</p>
+                <p className="text-xs text-gray-400 mt-1">by {r.manager?.name ?? r.teacher?.name ?? "Unknown"}</p>
               </div>
             ))}
             {pendingActions.length > 5 && (

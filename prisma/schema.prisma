@@ -16,8 +16,21 @@ enum Role {
 
 enum PaymentType {
   MONTHLY_SALARY      // Managers and Staff
-  PER_CLASS           // Teachers — fixed rate per class taught
+  PER_CLASS           // Teachers — fixed rate per section taught
   REVENUE_PERCENTAGE  // Teachers — percentage of student fees per class
+  FIXED_HOURS         // Teachers — hourly rate per section taught (each section = 1 hour)
+}
+
+enum StaffPaymentStatus {
+  DRAFT
+  PDF_GENERATED
+  FINALIZED
+}
+
+enum TeacherPaymentStatus {
+  DRAFT
+  PDF_GENERATED
+  FINALIZED
 }
 
 enum ClassStatus {
@@ -77,6 +90,8 @@ model Branch {
   attendanceReports AttendanceReport[]
   attendanceFinalizations AttendanceFinalization[]
   classMonthFinalizations ClassMonthFinalization[]
+  staffPayments     StaffPayment[]
+  teacherPayments   TeacherPayment[]
 }
 
 /// A course template defined by the General Manager
@@ -130,6 +145,8 @@ model ClassSection {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   teacherAttendances TeacherAttendance[]
+  studentEnrollments CourseEnrollment[]
+  studentAttendances StudentAttendance[]
 
   @@unique([courseClassId, sectionNumber])
 }
@@ -173,6 +190,7 @@ model User {
   monthlySalary     Float?           // For MONTHLY_SALARY
   perClassRate      Float?           // For PER_CLASS teachers
   revenuePercentage Float?           // For REVENUE_PERCENTAGE teachers
+  hourlyRate        Float?           // For FIXED_HOURS teachers
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   // Relations
@@ -183,11 +201,17 @@ model User {
   transactions      Transaction[]
   staffAttendances  StaffAttendance[]
   writtenReports    AttendanceReport[] @relation("WrittenReports")
+  teacherWrittenReports AttendanceReport[] @relation("TeacherWrittenReports")
   resolvedReports   AttendanceReport[] @relation("ResolvedReports")
   finalizedDays     AttendanceFinalization[] @relation("FinalizedDays")
+  teacherFinalizedDays AttendanceFinalization[] @relation("TeacherFinalizedDays")
   proctorExams      Exam[]           @relation("ProctorExams")
   finalizedExamScoring Exam[]        @relation("FinalizedExamScoring")
   finalizedClassMonths ClassMonthFinalization[] @relation("FinalizedClassMonths")
+  staffPayments     StaffPayment[]   @relation("UserStaffPayments")
+  staffPaymentsFinalized StaffPayment[] @relation("StaffPaymentFinalizer")
+  teacherPayments   TeacherPayment[] @relation("UserTeacherPayments")
+  teacherPaymentsFinalized TeacherPayment[] @relation("TeacherPaymentFinalizer")
 }
 
 model Student {
@@ -214,13 +238,15 @@ model Student {
   studentAttendances StudentAttendance[]
 }
 
-/// A student enrolled in a CourseClass
+/// A student enrolled in a CourseClass, assigned to a specific ClassSection
 model CourseEnrollment {
   id              String           @id @default(cuid())
   studentId       String
   student         Student          @relation(fields: [studentId], references: [id])
   courseClassId   String
   courseClass     CourseClass      @relation(fields: [courseClassId], references: [id])
+  classSectionId  String
+  classSection    ClassSection     @relation(fields: [classSectionId], references: [id])
   enrolledAt      DateTime         @default(now())
   status          EnrollmentStatus @default(ACTIVE)
   monthlyPayments MonthlyPayment[]
@@ -311,16 +337,18 @@ model OfficialHoliday {
 }
 
 model StudentAttendance {
-  id            String      @id @default(cuid())
-  courseClassId String
-  courseClass   CourseClass @relation(fields: [courseClassId], references: [id], onDelete: Cascade)
-  studentId     String
-  student       Student     @relation(fields: [studentId], references: [id])
-  date          DateTime    @db.Date
-  present       Boolean
-  isLate        Boolean     @default(false)
+  id             String       @id @default(cuid())
+  courseClassId  String
+  courseClass    CourseClass  @relation(fields: [courseClassId], references: [id], onDelete: Cascade)
+  classSectionId String
+  classSection   ClassSection @relation(fields: [classSectionId], references: [id], onDelete: Cascade)
+  studentId      String
+  student        Student      @relation(fields: [studentId], references: [id])
+  date           DateTime     @db.Date
+  present        Boolean
+  isLate         Boolean      @default(false)
 
-  @@unique([courseClassId, studentId, date])
+  @@unique([classSectionId, studentId, date])
 }
 
 model TeacherAttendance {
@@ -374,16 +402,19 @@ model StaffAttendance {
   @@unique([userId, date])
 }
 
-/// Reports written by managers about staff, teachers, students, or classes
+/// Reports written by managers OR teachers about staff, teachers, students, or classes
 /// reportKind: SIMPLE = informational note; ACTIONABLE = requires manager action + done/undone
 /// isAutomatic: true = auto-created from Late/Absent checkbox; false = manually written
+/// Exactly one of managerId / teacherId is set (the author)
 model AttendanceReport {
   id               String      @id @default(cuid())
   date             DateTime    @db.Date
   branchId         String
   branch           Branch      @relation(fields: [branchId], references: [id])
-  managerId        String
-  manager          User        @relation("WrittenReports", fields: [managerId], references: [id])
+  managerId        String?
+  manager          User?       @relation("WrittenReports", fields: [managerId], references: [id])
+  teacherId        String?
+  teacher          User?       @relation("TeacherWrittenReports", fields: [teacherId], references: [id])
   subjectType      String      // "STAFF" | "TEACHER" | "STUDENT" | "CLASS"
   subjectId        String      // userId for STAFF/TEACHER, studentId for STUDENT, courseClassId for CLASS
   isAutomatic      Boolean     @default(false)
@@ -399,15 +430,18 @@ model AttendanceReport {
   createdAt        DateTime    @default(now())
 }
 
-/// Granular attendance finalization — locks attendance per class / per staff / per teacher per day
-/// finalizationType: "CLASS" = all student attendance for that class; "STAFF" = one staff member; "TEACHER" = one teacher (all sections)
+/// Granular attendance finalization — locks attendance per section / per staff / per teacher per day
+/// finalizationType: "CLASS" = scopeId is classSectionId (per-section lock); "STAFF" = one staff member; "TEACHER" = one teacher section
+/// Exactly one of managerId / teacherId is set (the finalizer)
 model AttendanceFinalization {
   id                 String   @id @default(cuid())
   date               DateTime @db.Date
   branchId           String
   branch             Branch   @relation(fields: [branchId], references: [id])
-  managerId          String
-  manager            User     @relation("FinalizedDays", fields: [managerId], references: [id])
+  managerId          String?
+  manager            User?    @relation("FinalizedDays", fields: [managerId], references: [id])
+  teacherId          String?
+  teacher            User?    @relation("TeacherFinalizedDays", fields: [teacherId], references: [id])
   finalizationType   String   // "CLASS" | "STAFF" | "TEACHER"
   scopeId            String   // courseClassId for CLASS; userId for STAFF/TEACHER
   finalizedAt        DateTime @default(now())
@@ -430,4 +464,94 @@ model ClassMonthFinalization {
   studentsSnapshot Json        // [{studentId, studentDbId, firstName, lastName}] at time of finalization
 
   @@unique([courseClassId, monthNumber])
+}
+
+/// Monthly salary payment for STAFF and MANAGER role users
+/// dueDate = monthly anniversary of their join date
+model StaffPayment {
+  id              String             @id @default(cuid())
+  userId          String
+  user            User               @relation("UserStaffPayments", fields: [userId], references: [id])
+  branchId        String
+  branch          Branch             @relation(fields: [branchId], references: [id])
+  dueDate         DateTime           @db.Date  // monthly anniversary date
+  periodStart     DateTime           @db.Date  // period covered start
+  periodEnd       DateTime           @db.Date  // period covered end
+  grossAmount     Float              // salary snapshot at payment time
+  deduction       Float              @default(0)
+  deductionReason String?
+  memo            String?
+  netAmount       Float              // grossAmount - deduction
+  status          StaffPaymentStatus @default(DRAFT)
+  pdfGeneratedAt  DateTime?
+  finalizedAt     DateTime?
+  finalizedById   String?
+  finalizedBy     User?              @relation("StaffPaymentFinalizer", fields: [finalizedById], references: [id])
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@unique([userId, dueDate])
+}
+
+/// Monthly payment for TEACHER role users
+/// month + year = calendar month being paid
+model TeacherPayment {
+  id              String              @id @default(cuid())
+  teacherId       String
+  teacher         User                @relation("UserTeacherPayments", fields: [teacherId], references: [id])
+  branchId        String
+  branch          Branch              @relation(fields: [branchId], references: [id])
+  month           Int                 // 1-12 calendar month
+  year            Int
+  paymentType     PaymentType         // snapshot of teacher's payment type at time of payment
+  grossAmount     Float
+  deduction       Float               @default(0)
+  deductionReason String?
+  memo            String?
+  netAmount       Float
+  status          TeacherPaymentStatus @default(DRAFT)
+  pdfGeneratedAt  DateTime?
+  finalizedAt     DateTime?
+  finalizedById   String?
+  finalizedBy     User?               @relation("TeacherPaymentFinalizer", fields: [finalizedById], references: [id])
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  sections        TeacherPaymentSection[]
+  paidClassMonths TeacherPaymentClassMonth[]
+
+  @@unique([teacherId, month, year])
+}
+
+/// Line item for PER_CLASS and FIXED_HOURS teacher payments — one row per section
+model TeacherPaymentSection {
+  id               String         @id @default(cuid())
+  teacherPaymentId String
+  teacherPayment   TeacherPayment @relation(fields: [teacherPaymentId], references: [id], onDelete: Cascade)
+  classSectionId   String
+  courseClassId    String
+  classNameSnapshot String        // class name at time of payment
+  sectionLabel     String         // section name/number at time of payment
+  sessionsCount    Int            // number of sessions this teacher was present for this section
+  rateSnapshot     Float          // perClassRate or hourlyRate at time of payment
+  amount           Float          // sessionsCount × rateSnapshot
+}
+
+/// Line item for REVENUE_PERCENTAGE teacher payments — one row per finalized class-month
+/// @@unique prevents double-paying the same class-month for the same teacher
+model TeacherPaymentClassMonth {
+  id               String         @id @default(cuid())
+  teacherPaymentId String
+  teacherPayment   TeacherPayment @relation(fields: [teacherPaymentId], references: [id], onDelete: Cascade)
+  teacherId        String         // denormalized for unique check
+  courseClassId    String
+  classNameSnapshot String
+  monthNumber      Int
+  totalFeesAmount  Float          // total student fees collected for this class-month
+  percentageSnapshot Float        // teacher's revenuePercentage at time of payment
+  sectionsInClass  Int            // total sections in the class (for context)
+  teacherSections  Int            // how many sections this teacher teaches in this class
+  amount           Float          // totalFeesAmount × (percentageSnapshot / 100)
+
+  @@unique([teacherId, courseClassId, monthNumber])
 }

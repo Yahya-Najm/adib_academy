@@ -158,7 +158,7 @@ export default function GMReportsPage() {
                       )}
                       {r.content && <p className="text-sm text-gray-700">{r.content}</p>}
                       <p className="text-xs text-gray-400 mt-1">
-                        by {r.manager.name}
+                        by {r.manager?.name ?? r.teacher?.name ?? "Unknown"}
                         {r.doneBy && ` · Resolved by ${r.doneBy.name}`}
                       </p>
                     </div>
@@ -214,7 +214,7 @@ export default function GMReportsPage() {
                       )}
                       {r.content && <p className="text-sm text-gray-700">{r.content}</p>}
                       <p className="text-xs text-gray-400 mt-1">
-                        by {r.manager.name}
+                        by {r.manager?.name ?? r.teacher?.name ?? "Unknown"}
                         {r.doneBy && ` · Resolved by ${r.doneBy.name}`}
                       </p>
                     </div>

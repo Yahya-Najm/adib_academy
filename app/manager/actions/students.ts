@@ -160,35 +160,41 @@ export async function getClassesForEnrollment() {
     where: { branchId: branchId ?? undefined, status: "ACTIVE" },
     include: {
       courseTemplate: { select: { name: true, monthlyFee: true, durationMonths: true } },
+      sections: {
+        include: { teacher: { select: { name: true } } },
+        orderBy: { sectionNumber: "asc" },
+      },
     },
     orderBy: { createdAt: "desc" },
   });
 }
 
-export async function enrollStudent(studentId: string, courseClassId: string, fromDate?: string) {
+export async function enrollStudent(studentId: string, courseClassId: string, classSectionId: string, fromDate?: string) {
   const { branchId } = await getManagerInfo();
 
   const student = await prisma.student.findUnique({ where: { id: studentId } });
   if (!student || student.branchId !== branchId) throw new Error("Student not found");
 
-  const courseClass = await prisma.courseClass.findUnique({
-    where: { id: courseClassId },
-    include: { courseTemplate: true },
+  const section = await prisma.classSection.findUnique({
+    where: { id: classSectionId },
+    include: { courseClass: { include: { courseTemplate: true } } },
   });
-  if (!courseClass || courseClass.branchId !== branchId) throw new Error("Class not found");
+  if (!section || section.courseClassId !== courseClassId || section.courseClass.branchId !== branchId)
+    throw new Error("Section not found");
 
   const existing = await prisma.courseEnrollment.findUnique({
     where: { studentId_courseClassId: { studentId, courseClassId } },
   });
   if (existing) throw new Error("Student is already enrolled in this class");
 
-  const { monthlyFee, durationMonths } = courseClass.courseTemplate;
-  const startDate = courseClass.startDate;
+  const { monthlyFee, durationMonths } = section.courseClass.courseTemplate;
+  const startDate = section.courseClass.startDate;
 
   return prisma.courseEnrollment.create({
     data: {
       studentId,
       courseClassId,
+      classSectionId,
       monthlyPayments: {
         create: Array.from({ length: durationMonths }, (_, i) => {
           const dueDate = new Date(startDate);
