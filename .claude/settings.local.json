@@ -26,7 +26,8 @@
       "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\api\\\\pdf\\\\staff-payment\\\\[id]\")",
       "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\api\\\\pdf\\\\teacher-payment\\\\[id]\")",
       "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\manager\\\\payments\\\\staff\\\\[id]\")",
-      "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\manager\\\\payments\\\\teachers\\\\[id]\")"
+      "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\manager\\\\payments\\\\teachers\\\\[id]\")",
+      "Bash(git:*)"
     ]
   }
 }
