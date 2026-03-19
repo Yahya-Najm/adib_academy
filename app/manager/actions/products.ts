@@ -39,13 +39,26 @@ export async function recordSale(productId: string, quantity: number) {
 
   const totalPrice = product.price * quantity;
 
-  await prisma.$transaction([
-    prisma.productSale.create({
+  await prisma.$transaction(async (tx) => {
+    const sale = await tx.productSale.create({
       data: { productId, quantity, totalPrice, soldById, branchId },
-    }),
-    prisma.product.update({
+    });
+    await tx.product.update({
       where: { id: productId },
       data: { stock: { decrement: quantity } },
-    }),
-  ]);
+    });
+    await tx.transaction.create({
+      data: {
+        type: "INCOME",
+        sourceType: "PRODUCT_SALE",
+        sourceId: sale.id,
+        category: "Product Sale",
+        description: `${product.name} × ${quantity}`,
+        amount: totalPrice,
+        transactionDate: new Date(),
+        branchId,
+        recordedById: soldById,
+      },
+    });
+  });
 }

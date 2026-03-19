@@ -71,6 +71,19 @@ enum ExamType {
   FINAL
 }
 
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum TransactionSource {
+  MANUAL
+  STUDENT_PAYMENT
+  PRODUCT_SALE
+  STAFF_SALARY
+  TEACHER_PAYMENT
+}
+
 model Branch {
   id              String             @id @default(cuid())
   name            String
@@ -298,18 +311,21 @@ model ProductSale {
 }
 
 model Transaction {
-  id              String   @id @default(cuid())
-  trackingNumber  String   @unique
-  category        String   // free text + datalist presets
+  id              String            @id @default(cuid())
+  trackingNumber  String?           @unique  // required for MANUAL, null for system-generated
+  type            TransactionType   @default(EXPENSE)
+  sourceType      TransactionSource @default(MANUAL)
+  sourceId        String?           // reference to originating record (paymentId, saleId, etc.)
+  category        String            // free text + datalist presets
   description     String?
   amount          Float
-  transactionDate DateTime // manager-set; the actual date the expense occurred
+  transactionDate DateTime          // the actual date the money moved
   branchId        String
-  branch          Branch   @relation(fields: [branchId], references: [id])
+  branch          Branch            @relation(fields: [branchId], references: [id])
   recordedById    String
-  recordedBy      User     @relation(fields: [recordedById], references: [id])
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  recordedBy      User              @relation(fields: [recordedById], references: [id])
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 }
 
 model ExamScore {

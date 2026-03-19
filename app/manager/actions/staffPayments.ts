@@ -276,18 +276,38 @@ export async function finalizeStaffPayment(paymentId: string) {
 
   const payment = await prisma.staffPayment.findFirst({
     where: { id: paymentId, branchId: branchId ?? undefined },
+    include: { user: { select: { name: true } } },
   });
   if (!payment) throw new Error("Payment not found");
   if (payment.status === "DRAFT") throw new Error("PDF must be generated before finalizing");
   if (payment.status === "FINALIZED") throw new Error("Already finalized");
 
-  return prisma.staffPayment.update({
-    where: { id: paymentId },
-    data: {
-      status: "FINALIZED",
-      finalizedAt: new Date(),
-      finalizedById: session.user.id,
-    },
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.staffPayment.update({
+      where: { id: paymentId },
+      data: {
+        status: "FINALIZED",
+        finalizedAt: now,
+        finalizedById: session.user.id,
+      },
+    });
+
+    await tx.transaction.create({
+      data: {
+        type: "EXPENSE",
+        sourceType: "STAFF_SALARY",
+        sourceId: paymentId,
+        category: "Staff Salary",
+        description: `Salary: ${payment.user.name} (${payment.periodStart.toLocaleDateString("en-GB")} – ${payment.periodEnd.toLocaleDateString("en-GB")})`,
+        amount: payment.netAmount,
+        transactionDate: now,
+        branchId: payment.branchId,
+        recordedById: session.user.id,
+      },
+    });
+
+    return updated;
   });
 }
 

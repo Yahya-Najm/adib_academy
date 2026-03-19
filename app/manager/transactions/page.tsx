@@ -42,7 +42,7 @@ export default function TransactionsPage() {
   function openEdit(t: Transaction) {
     setEditItem(t);
     setForm({
-      trackingNumber: t.trackingNumber,
+      trackingNumber: t.trackingNumber ?? "",
       category: t.category,
       description: t.description ?? "",
       amount: String(t.amount),

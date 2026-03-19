@@ -374,18 +374,40 @@ export async function finalizeTeacherPayment(paymentId: string) {
 
   const payment = await prisma.teacherPayment.findFirst({
     where: { id: paymentId, branchId: branchId ?? undefined },
+    include: { teacher: { select: { name: true } } },
   });
   if (!payment) throw new Error("Payment not found");
   if (payment.status === "DRAFT") throw new Error("PDF must be generated before finalizing");
   if (payment.status === "FINALIZED") throw new Error("Already finalized");
 
-  return prisma.teacherPayment.update({
-    where: { id: paymentId },
-    data: {
-      status: "FINALIZED",
-      finalizedAt: new Date(),
-      finalizedById: session.user.id,
-    },
+  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const now = new Date();
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.teacherPayment.update({
+      where: { id: paymentId },
+      data: {
+        status: "FINALIZED",
+        finalizedAt: now,
+        finalizedById: session.user.id,
+      },
+    });
+
+    await tx.transaction.create({
+      data: {
+        type: "EXPENSE",
+        sourceType: "TEACHER_PAYMENT",
+        sourceId: paymentId,
+        category: "Teacher Payment",
+        description: `Payment: ${payment.teacher.name} (${monthNames[payment.month - 1]} ${payment.year})`,
+        amount: payment.netAmount,
+        transactionDate: now,
+        branchId: payment.branchId,
+        recordedById: session.user.id,
+      },
+    });
+
+    return updated;
   });
 }
 

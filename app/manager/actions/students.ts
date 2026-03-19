@@ -221,7 +221,7 @@ export async function recordPayment(
     paidAt?: string;      // ISO date string; undefined = now
   }
 ) {
-  const { branchId } = await getManagerInfo();
+  const { id: recordedById, branchId } = await getManagerInfo();
   const payment = await prisma.monthlyPayment.findUnique({
     where: { id: paymentId },
     include: { enrollment: { include: { student: true } } },
@@ -242,16 +242,39 @@ export async function recordPayment(
 
   const paidAt = opts.paidAt ? new Date(opts.paidAt) : new Date();
   const status = opts.discounted || newTotal >= payment.amount ? "PAID" : "PARTIAL";
+  const student = payment.enrollment.student;
+  const studentName = `${student.firstName} ${student.lastName}`;
 
-  return prisma.monthlyPayment.update({
-    where: { id: paymentId },
-    data: {
-      paidAmount: newTotal,
-      feesRefId: opts.feesRefId.trim(),
-      discounted: opts.discounted ?? false,
-      paidAt,
-      status,
-    },
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.monthlyPayment.update({
+      where: { id: paymentId },
+      data: {
+        paidAmount: newTotal,
+        feesRefId: opts.feesRefId.trim(),
+        discounted: opts.discounted ?? false,
+        paidAt,
+        status,
+      },
+    });
+
+    // Record real money received (skip $0 discount-only entries)
+    if (opts.amount > 0) {
+      await tx.transaction.create({
+        data: {
+          type: "INCOME",
+          sourceType: "STUDENT_PAYMENT",
+          sourceId: paymentId,
+          category: "Tuition Fee",
+          description: `${studentName} — Month ${payment.monthNumber} (Ref: ${opts.feesRefId.trim()})`,
+          amount: opts.amount,
+          transactionDate: paidAt,
+          branchId: branchId!,
+          recordedById,
+        },
+      });
+    }
+
+    return updated;
   });
 }
 

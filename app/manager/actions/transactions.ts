@@ -13,6 +13,7 @@ export async function getTransactions(search?: string) {
   return prisma.transaction.findMany({
     where: {
       branchId: branchId ?? undefined,
+      sourceType: "MANUAL",  // expenses page only shows manual entries
       ...(search ? {
         OR: [
           { trackingNumber: { contains: search, mode: "insensitive" } },
@@ -47,6 +48,8 @@ export async function createTransaction(data: {
   return prisma.transaction.create({
     data: {
       trackingNumber: data.trackingNumber.trim(),
+      type: "EXPENSE",
+      sourceType: "MANUAL",
       category: data.category.trim(),
       description: data.description?.trim() || null,
       amount: data.amount,

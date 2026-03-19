@@ -11,6 +11,7 @@ const nav = [
   { label: "Payments", href: "/manager/payments" },
   { label: "Transactions", href: "/manager/transactions" },
   { label: "Products", href: "/manager/products" },
+  { label: "Financials", href: "/manager/financials" },
 ];
 
 export default function ManagerLayout({ children }: { children: React.ReactNode }) {
