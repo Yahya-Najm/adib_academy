@@ -24,7 +24,7 @@ npm run lint
 
 ## Stack
 
-- **Next.js 16** — App Router (Railway deployment)
+- **Next.js 16** — App Router (Vercel deployment)
 - **React 19**, **TypeScript**, **Tailwind CSS v4**
 - **Prisma 7** + **PostgreSQL** (Docker on port 5433 locally; Railway plugin in production)
 - **Auth.js v5** (`next-auth@beta`) — credentials-based, JWT sessions
@@ -40,14 +40,22 @@ Run `npm run db:seed` to create GM accounts. **Requires environment variables** 
 
 If no `GM1_*` or `GM2_*` env vars are set, seed exits with an error.
 
-## Deployment (Railway)
+## Deployment
 
-Set these env vars in the Railway project dashboard:
-- `DATABASE_URL` — auto-injected by Railway's PostgreSQL plugin
+**Vercel** is the active deployment target. Build command set in Vercel dashboard:
+```
+npm run db:deploy && npm run build
+```
+This runs `prisma db push && seed` then `prisma generate && next build` on every deploy — schema migrations are applied automatically.
+
+**Required env vars** (set in Vercel project → Settings → Environment Variables):
+- `DATABASE_URL` — production Postgres connection string
 - `AUTH_SECRET` — generate with `openssl rand -base64 32`
-- `NEXTAUTH_URL` — your Railway public domain (e.g. `https://your-app.up.railway.app`)
+- `NEXTAUTH_URL` — your Vercel domain (e.g. `https://your-app.vercel.app`)
 - `NODE_ENV=production`
 - `GM1_EMAIL`, `GM1_NAME`, `GM1_PASSWORD` — for seed script
+
+**Railway** (legacy): same env vars; `DATABASE_URL` auto-injected by Railway's PostgreSQL plugin.
 
 ## Architecture
 
@@ -111,8 +119,8 @@ Branch
 └── AttendanceFinalization[]  (@@unique on [date, branchId, finalizationType, scopeId] — per-scope lock)
 
 User
-├── sentMessages[]     Message (channel: DIRECT|GENERAL)
-└── receivedMessages[] Message (receiverId=null for GENERAL)
+├── sentMessages[]     Message (channel: DIRECT|BRANCH_GENERAL)
+└── receivedMessages[] Message (receiverId=null for BRANCH_GENERAL)
 ```
 
 - A **Manager** can only see/edit records where `branchId = session.user.branchId`.
@@ -174,18 +182,19 @@ The manager overview page (`/manager`) surfaces three notification panels:
 
 ### Messaging system
 
-In-app messaging with direct messages and a general broadcast channel.
+In-app messaging with direct messages and branch-scoped general channels.
 
-**Model:** `Message` — `senderId`, `receiverId` (null=general), `channel` (`DIRECT`|`GENERAL`), `content`, `read`
+**Model:** `Message` — `senderId`, `receiverId` (null=BRANCH_GENERAL), `channel` (`DIRECT`|`BRANCH_GENERAL`), `branchId` (set for BRANCH_GENERAL), `content`, `read`
 
 **Permission rules (server-enforced in `app/actions/messages.ts`):**
-- **GM** → can DM any manager or teacher; can post to general
-- **Manager** → can DM teachers in their branch + GM; can post to general
-- **Teacher** → can DM their branch manager + GM; can post to general
-- **General** channel messages visible to all authenticated users
+- **GM** → can DM any manager, teacher, or staff; can post to any branch general channel
+- **Manager** → can DM GM, teachers, and staff in their branch; can post to their branch general
+- **Teacher** → can DM GM, their branch manager, and staff in their branch; can post to their branch general
+- **BRANCH_GENERAL** messages visible only to users in that branch + GM
 - **Direct** messages visible only to sender and receiver
+- `MAX_MESSAGE_LENGTH = 1000` enforced server-side in `sendMessage()`
 
-**UI:** `components/messages/MessagesPage.tsx` is a shared client component with tabs (Inbox | General | New Message). Each role has a thin server-component wrapper at `app/{role}/messages/page.tsx` that passes the accent color and userId.
+**UI:** `components/messages/MessagesPage.tsx` is a shared client component. Props: `accent`, `userId`, `userRole`, `branches[]`. Each role's server wrapper at `app/{role}/messages/page.tsx` fetches the relevant branches from Prisma and passes them as props (GM gets all branches; Manager/Teacher get their single branch). Tabs: Inbox | [Branch Name] General (one per branch) | New Message. Polls every 15s. Unread red dot badge per general tab tracked via `lastSeenGeneral` timestamp state.
 
 ### Exam system
 - `Exam.examType`: `REGULAR | FINAL` — only one FINAL allowed per class
