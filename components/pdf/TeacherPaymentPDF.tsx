@@ -367,7 +367,7 @@ export default function TeacherPaymentPDF({
                       <Text style={[styles.tableCell, { flex: 2 }]}>{cm.classNameSnapshot}</Text>
                       <Text style={[styles.tableCell, { width: 50 }]}>M{cm.monthNumber}</Text>
                       <Text style={[styles.tableCell, { width: 80 }]}>${fmt(cm.totalFeesAmount)}</Text>
-                      <Text style={[styles.tableCell, { width: 50 }]}>{cm.percentageSnapshot}%</Text>
+                      <Text style={[styles.tableCell, { width: 50 }]}>{cm.percentageSnapshot * cm.teacherSections}%</Text>
                       <Text style={[styles.tableCell, { width: 70, textAlign: "right", fontFamily: "Helvetica-Bold", color: "#134e4a" }]}>${fmt(cm.amount)}</Text>
                     </View>
                   ))

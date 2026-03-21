@@ -166,7 +166,7 @@ export async function getTeacherPaymentContext(teacherId: string, month: number,
       });
       const teacherSectionsCount = sections.filter(s => s.courseClassId === fm.courseClassId).length;
 
-      const amount = totalFees * (teacher.revenuePercentage / 100);
+      const amount = totalFees * (teacher.revenuePercentage / 100) * teacherSectionsCount;
 
       eligibleClassMonths.push({
         courseClassId: fm.courseClassId,
@@ -288,7 +288,7 @@ export async function createOrUpdateTeacherPayment(
     }
   } else {
     for (const cm of eligibleClassMonths) {
-      cm.amount = cm.totalFeesAmount * (cm.percentageSnapshot / 100);
+      cm.amount = cm.totalFeesAmount * (cm.percentageSnapshot / 100) * cm.teacherSections;
     }
   }
 
