@@ -17,8 +17,8 @@ npm run db:studio              # open Prisma Studio
 npm run db:seed                # seed GM accounts (requires GM1_* env vars)
 
 # Build / lint
-npm run build                  # chains: prisma generate → db push → next build → seed (requires running DB)
-npx next build                 # Next.js build only (no DB required — use for type checking)
+npm run build                  # prisma generate → next build only (no DB required — use for type checking too)
+npm run db:deploy              # prisma db push + seed — run separately where DB is available
 npm run lint
 ```
 
@@ -28,6 +28,9 @@ npm run lint
 - **React 19**, **TypeScript**, **Tailwind CSS v4**
 - **Prisma 7** + **PostgreSQL** (Docker on port 5433 locally; Railway plugin in production)
 - **Auth.js v5** (`next-auth@beta`) — credentials-based, JWT sessions
+- **Path alias**: `@/*` → project root (e.g. `@/lib/prisma`, `@/components/...`)
+- **Prisma client** (`lib/prisma.ts`) uses `PrismaPg` driver adapter (`@prisma/adapter-pg`) — connects via `DATABASE_URL`; singleton via `globalThis` to survive hot reload
+- **No test framework** — no tests exist in this repo
 
 ## Seed / Dev credentials
 
@@ -115,7 +118,7 @@ User
 - A **Manager** can only see/edit records where `branchId = session.user.branchId`.
 - **GM** sees all branches.
 - A **CourseTemplate** defines `numSections` — when a Manager creates a class, they must assign exactly that many `ClassSection` rows with a teacher each.
-- **Students** are branch-scoped, have an auto-generated `studentId` (e.g. `ali-hassan-3f2a`), and link to enrollments which generate `MonthlyPayment` rows.
+- **Students** are branch-scoped, have an auto-generated `studentId` (e.g. `ali-hassan-3f2a`), and link to enrollments which generate `MonthlyPayment` rows. `EnrollmentStatus`: `ACTIVE | COMPLETED | DROPPED`. Student has `EducationLevel` enum: `BELOW_GRADE_6 | GRADE_6_AND_ABOVE | SCHOOL_GRADUATE | BACHELOR | MASTERS | OTHER`.
 
 ### MonthlyPayment fields
 - `status`: `PENDING | PAID | PARTIAL | OVERDUE`

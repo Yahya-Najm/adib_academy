@@ -3,6 +3,8 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
+const MAX_MESSAGE_LENGTH = 1000;
+
 async function requireAuth() {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
@@ -14,45 +16,59 @@ export async function getContacts() {
   const { id, role, branchId } = session.user as { id: string; role: string; branchId?: string | null };
 
   if (role === "GENERAL_MANAGER") {
-    // GM can message any manager or teacher
-    const users = await prisma.user.findMany({
-      where: { role: { in: ["MANAGER", "TEACHER"] }, active: true },
-      select: { id: true, name: true, role: true, branch: { select: { name: true } } },
-      orderBy: { name: "asc" },
+    return prisma.user.findMany({
+      where: { role: { in: ["MANAGER", "TEACHER", "STAFF"] }, active: true },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        staffType: true,
+        branch: { select: { id: true, name: true } },
+      },
+      orderBy: [{ branch: { name: "asc" } }, { name: "asc" }],
     });
-    return users;
   }
 
   if (role === "MANAGER") {
-    // Manager can message teachers in their branch + GM
     const users = await prisma.user.findMany({
       where: {
         active: true,
         OR: [
           { role: "GENERAL_MANAGER" },
-          { role: "TEACHER", branchId: branchId ?? undefined },
+          { role: { in: ["TEACHER", "STAFF"] }, branchId: branchId ?? undefined },
         ],
       },
-      select: { id: true, name: true, role: true, branch: { select: { name: true } } },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        staffType: true,
+        branch: { select: { id: true, name: true } },
+      },
       orderBy: { name: "asc" },
     });
-    return users.filter(u => u.id !== id);
+    return users.filter((u) => u.id !== id);
   }
 
   if (role === "TEACHER") {
-    // Teacher can message their branch manager + GM
     const users = await prisma.user.findMany({
       where: {
         active: true,
         OR: [
           { role: "GENERAL_MANAGER" },
-          { role: "MANAGER", branchId: branchId ?? undefined },
+          { role: { in: ["MANAGER", "STAFF"] }, branchId: branchId ?? undefined },
         ],
       },
-      select: { id: true, name: true, role: true, branch: { select: { name: true } } },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        staffType: true,
+        branch: { select: { id: true, name: true } },
+      },
       orderBy: { name: "asc" },
     });
-    return users.filter(u => u.id !== id);
+    return users.filter((u) => u.id !== id);
   }
 
   return [];
@@ -62,21 +78,20 @@ export async function getConversations() {
   const session = await requireAuth();
   const userId = session.user.id!;
 
-  // Get all direct messages involving this user
   const messages = await prisma.message.findMany({
     where: {
       channel: "DIRECT",
       OR: [{ senderId: userId }, { receiverId: userId }],
     },
     orderBy: { createdAt: "desc" },
+    take: 200,
     include: {
       sender: { select: { id: true, name: true, role: true } },
       receiver: { select: { id: true, name: true, role: true } },
     },
   });
 
-  // Group by other user, pick latest message per conversation
-  const conversationMap = new Map<string, typeof messages[0]>();
+  const conversationMap = new Map<string, (typeof messages)[0]>();
   for (const msg of messages) {
     const otherId = msg.senderId === userId ? msg.receiverId! : msg.senderId;
     if (!conversationMap.has(otherId)) {
@@ -84,12 +99,12 @@ export async function getConversations() {
     }
   }
 
-  // Count unread per conversation
   const conversations = [];
   for (const [otherId, latestMsg] of conversationMap) {
-    const other = latestMsg.senderId === userId ? latestMsg.receiver! : latestMsg.sender;
+    const other =
+      latestMsg.senderId === userId ? latestMsg.receiver! : latestMsg.sender;
     const unreadCount = messages.filter(
-      m => m.senderId === otherId && m.receiverId === userId && !m.read
+      (m) => m.senderId === otherId && m.receiverId === userId && !m.read
     ).length;
     conversations.push({
       otherUserId: otherId,
@@ -102,7 +117,9 @@ export async function getConversations() {
     });
   }
 
-  return conversations.sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
+  return conversations.sort(
+    (a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime()
+  );
 }
 
 export async function getConversation(otherUserId: string) {
@@ -118,12 +135,12 @@ export async function getConversation(otherUserId: string) {
       ],
     },
     orderBy: { createdAt: "asc" },
+    take: 100,
     include: {
       sender: { select: { id: true, name: true } },
     },
   });
 
-  // Mark unread messages as read
   await prisma.message.updateMany({
     where: {
       channel: "DIRECT",
@@ -142,12 +159,21 @@ export async function getConversation(otherUserId: string) {
   return { messages, otherUser };
 }
 
-export async function getGeneralMessages() {
+export async function getBranchGeneralMessages(branchId: string) {
   const session = await requireAuth();
+  const { role, branchId: userBranchId } = session.user as {
+    role: string;
+    branchId?: string | null;
+  };
+
+  if (role !== "GENERAL_MANAGER" && userBranchId !== branchId) {
+    throw new Error("Unauthorized");
+  }
 
   return prisma.message.findMany({
-    where: { channel: "GENERAL" },
+    where: { channel: "BRANCH_GENERAL", branchId },
     orderBy: { createdAt: "asc" },
+    take: 100,
     include: {
       sender: { select: { id: true, name: true, role: true } },
     },
@@ -156,13 +182,20 @@ export async function getGeneralMessages() {
 
 export async function sendMessage(data: {
   receiverId?: string;
-  channel: "DIRECT" | "GENERAL";
+  channel: "DIRECT" | "BRANCH_GENERAL";
   content: string;
+  branchId?: string;
 }) {
   const session = await requireAuth();
-  const { id: senderId, role, branchId } = session.user as { id: string; role: string; branchId?: string | null };
+  const { id: senderId, role, branchId } = session.user as {
+    id: string;
+    role: string;
+    branchId?: string | null;
+  };
 
   if (!data.content.trim()) throw new Error("Message cannot be empty");
+  if (data.content.length > MAX_MESSAGE_LENGTH)
+    throw new Error(`Message cannot exceed ${MAX_MESSAGE_LENGTH} characters`);
 
   if (data.channel === "DIRECT") {
     if (!data.receiverId) throw new Error("Recipient is required for direct messages");
@@ -173,53 +206,73 @@ export async function sendMessage(data: {
     });
     if (!receiver) throw new Error("Recipient not found");
 
-    // Permission checks
     if (role === "GENERAL_MANAGER") {
-      if (!["MANAGER", "TEACHER"].includes(receiver.role)) {
-        throw new Error("You can only message managers and teachers");
+      if (!["MANAGER", "TEACHER", "STAFF"].includes(receiver.role)) {
+        throw new Error("You can only message managers, teachers, and staff");
       }
     } else if (role === "MANAGER") {
       if (receiver.role === "GENERAL_MANAGER") {
         // OK
-      } else if (receiver.role === "TEACHER" && receiver.branchId === branchId) {
+      } else if (
+        ["TEACHER", "STAFF"].includes(receiver.role) &&
+        receiver.branchId === branchId
+      ) {
         // OK
       } else {
-        throw new Error("You can only message the GM or teachers in your branch");
+        throw new Error(
+          "You can only message the GM, teachers, or staff in your branch"
+        );
       }
     } else if (role === "TEACHER") {
       if (receiver.role === "GENERAL_MANAGER") {
         // OK
-      } else if (receiver.role === "MANAGER" && receiver.branchId === branchId) {
+      } else if (
+        ["MANAGER", "STAFF"].includes(receiver.role) &&
+        receiver.branchId === branchId
+      ) {
         // OK
       } else {
-        throw new Error("You can only message the GM or your branch manager");
+        throw new Error(
+          "You can only message the GM, your branch manager, or branch staff"
+        );
       }
     } else {
       throw new Error("Unauthorized");
     }
+
+    return prisma.message.create({
+      data: {
+        senderId,
+        receiverId: data.receiverId,
+        channel: "DIRECT",
+        content: data.content.trim(),
+      },
+    });
   }
 
-  return prisma.message.create({
-    data: {
-      senderId,
-      receiverId: data.channel === "DIRECT" ? data.receiverId! : null,
-      channel: data.channel,
-      content: data.content.trim(),
-    },
-  });
-}
+  if (data.channel === "BRANCH_GENERAL") {
+    const targetBranchId = data.branchId;
+    if (!targetBranchId) throw new Error("Branch is required for branch general messages");
 
-export async function markAsRead(messageId: string) {
-  const session = await requireAuth();
-  const userId = session.user.id!;
+    if (role !== "GENERAL_MANAGER" && branchId !== targetBranchId) {
+      throw new Error("Unauthorized");
+    }
 
-  const message = await prisma.message.findUnique({ where: { id: messageId } });
-  if (!message || message.receiverId !== userId) throw new Error("Message not found");
+    if (!["GENERAL_MANAGER", "MANAGER", "TEACHER"].includes(role)) {
+      throw new Error("Unauthorized");
+    }
 
-  return prisma.message.update({
-    where: { id: messageId },
-    data: { read: true },
-  });
+    return prisma.message.create({
+      data: {
+        senderId,
+        channel: "BRANCH_GENERAL",
+        branchId: targetBranchId,
+        content: data.content.trim(),
+      },
+    });
+  }
+
+  throw new Error("Invalid channel");
 }
 
 export async function getUnreadCount() {

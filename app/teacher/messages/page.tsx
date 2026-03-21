@@ -1,9 +1,29 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import MessagesPage from "@/components/messages/MessagesPage";
+import { prisma } from "@/lib/prisma";
 
 export default async function TeacherMessagesPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  return <MessagesPage accent="dark" userId={session.user.id} />;
+
+  const user = session.user as { id: string; role: string; branchId?: string | null };
+
+  let branches: { id: string; name: string }[] = [];
+  if (user.branchId) {
+    const branch = await prisma.branch.findUnique({
+      where: { id: user.branchId },
+      select: { id: true, name: true },
+    });
+    if (branch) branches = [branch];
+  }
+
+  return (
+    <MessagesPage
+      accent="dark"
+      userId={user.id}
+      userRole={user.role}
+      branches={branches}
+    />
+  );
 }

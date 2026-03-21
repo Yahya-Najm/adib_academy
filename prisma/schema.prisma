@@ -104,6 +104,7 @@ model Branch {
   classMonthFinalizations ClassMonthFinalization[]
   staffPayments     StaffPayment[]
   teacherPayments   TeacherPayment[]
+  messages          Message[]        @relation("BranchMessages")
 }
 
 /// A course template defined by the General Manager
@@ -554,14 +555,17 @@ model TeacherPaymentSection {
   amount           Float          // sessionsCount × rateSnapshot
 }
 
-/// In-app message — direct or general channel
+/// In-app message — direct or branch general channel
+/// channel: "DIRECT" (receiverId set) | "BRANCH_GENERAL" (branchId set)
 model Message {
   id         String   @id @default(cuid())
   senderId   String
   sender     User     @relation("SentMessages", fields: [senderId], references: [id])
-  receiverId String?  // null = general channel
+  receiverId String?  // null for BRANCH_GENERAL
   receiver   User?    @relation("ReceivedMessages", fields: [receiverId], references: [id])
-  channel    String   // "DIRECT" | "GENERAL"
+  channel    String   // "DIRECT" | "BRANCH_GENERAL"
+  branchId   String?  // set for BRANCH_GENERAL messages
+  branch     Branch?  @relation("BranchMessages", fields: [branchId], references: [id])
   content    String
   read       Boolean  @default(false)
   createdAt  DateTime @default(now())
