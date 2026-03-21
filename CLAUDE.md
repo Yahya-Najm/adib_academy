@@ -14,23 +14,28 @@ npm run db:generate            # regenerate Prisma client
 npm run db:push                # push schema to DB (dev only)
 npm run db:push --accept-data-loss  # when adding unique constraints to existing data
 npm run db:studio              # open Prisma Studio
+npm run db:seed                # seed GM accounts (requires GM1_* env vars)
 
 # Build / lint
-npm run build
+npm run build                  # chains: prisma generate → db push → next build → seed (requires running DB)
+npx next build                 # Next.js build only (no DB required — use for type checking)
 npm run lint
 ```
 
 ## Stack
 
-- **Next.js 16** — App Router, `output: "standalone"` (Railway deployment)
+- **Next.js 16** — App Router (Railway deployment)
 - **React 19**, **TypeScript**, **Tailwind CSS v4**
 - **Prisma 7** + **PostgreSQL** (Docker on port 5433 locally; Railway plugin in production)
 - **Auth.js v5** (`next-auth@beta`) — credentials-based, JWT sessions
 
 ## Seed / Dev credentials
 
-Run `npx prisma db seed` to create the GM account:
-- Email: `gm@adibacademy.com` / Password: `admin123`
+Run `npm run db:seed` to create GM accounts. **Requires environment variables** — no hardcoded fallback:
+- `GM1_EMAIL`, `GM1_NAME`, `GM1_PASSWORD` (required for at least one GM)
+- `GM2_EMAIL`, `GM2_NAME`, `GM2_PASSWORD` (optional second GM)
+
+If no `GM1_*` or `GM2_*` env vars are set, seed exits with an error.
 
 ## Deployment (Railway)
 
@@ -39,6 +44,7 @@ Set these env vars in the Railway project dashboard:
 - `AUTH_SECRET` — generate with `openssl rand -base64 32`
 - `NEXTAUTH_URL` — your Railway public domain (e.g. `https://your-app.up.railway.app`)
 - `NODE_ENV=production`
+- `GM1_EMAIL`, `GM1_NAME`, `GM1_PASSWORD` — for seed script
 
 ## Architecture
 
@@ -54,6 +60,9 @@ Set these env vars in the Railway project dashboard:
 - `components/Providers.tsx` — wraps root layout with `SessionProvider`
 - `types/next-auth.d.ts` — extends `Session` and `JWT` with `role`, `id`, `branchId`
 - **No sign-up** — all accounts are created by the General Manager only.
+
+### Security headers
+`next.config.ts` sets `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Strict-Transport-Security`, and `Referrer-Policy` on all routes.
 
 ### Dashboard layout system
 Each role has its own directory with a `layout.tsx` that feeds nav items into the shared
@@ -72,6 +81,8 @@ All mutations and data fetches happen in `actions/` folders co-located with each
 Every action calls a `guard.ts` helper first (`requireGM()` / `requireManager()` / `requireTeacher()`),
 which calls `auth()` and throws `"Unauthorized"` if the role doesn't match.
 Server action files are marked `"use server"` at the top.
+
+**Cross-role shared actions** live in `app/actions/` (e.g. `app/actions/messages.ts`) and guard via `auth()` directly, checking the session role internally.
 
 ### Data model — key relationships
 
@@ -95,6 +106,10 @@ Branch
 ├── StaffAttendance[]  (daily present/absent/late for STAFF role users)
 ├── AttendanceReport[] (auto + manual reports for STAFF/TEACHER/STUDENT/CLASS)
 └── AttendanceFinalization[]  (@@unique on [date, branchId, finalizationType, scopeId] — per-scope lock)
+
+User
+├── sentMessages[]     Message (channel: DIRECT|GENERAL)
+└── receivedMessages[] Message (receiverId=null for GENERAL)
 ```
 
 - A **Manager** can only see/edit records where `branchId = session.user.branchId`.
@@ -154,6 +169,21 @@ The manager overview page (`/manager`) surfaces three notification panels:
 - Report counts surface on the Manager dashboard (branch-scoped) and GM dashboard (all branches, with per-branch breakdown)
 - Reports appear in: student profile (`/manager/students/[id]`, `/general-manager/students/[id]`); staff profile (`/manager/staff/[id]`, `/general-manager/staff/[id]`); teacher profile (`/manager/teachers/[id]`, `/general-manager/teachers/[id]`); class detail page
 
+### Messaging system
+
+In-app messaging with direct messages and a general broadcast channel.
+
+**Model:** `Message` — `senderId`, `receiverId` (null=general), `channel` (`DIRECT`|`GENERAL`), `content`, `read`
+
+**Permission rules (server-enforced in `app/actions/messages.ts`):**
+- **GM** → can DM any manager or teacher; can post to general
+- **Manager** → can DM teachers in their branch + GM; can post to general
+- **Teacher** → can DM their branch manager + GM; can post to general
+- **General** channel messages visible to all authenticated users
+- **Direct** messages visible only to sender and receiver
+
+**UI:** `components/messages/MessagesPage.tsx` is a shared client component with tabs (Inbox | General | New Message). Each role has a thin server-component wrapper at `app/{role}/messages/page.tsx` that passes the accent color and userId.
+
 ### Exam system
 - `Exam.examType`: `REGULAR | FINAL` — only one FINAL allowed per class
 - `Exam.classMonth`: auto-computed month-of-class the exam date falls in
@@ -191,7 +221,7 @@ The manager overview page (`/manager`) surfaces three notification panels:
 ### User model
 Roles: `GENERAL_MANAGER | MANAGER | TEACHER | STAFF`
 `STAFF` users (cleaner, cook, etc.) have a `staffType` string and no dashboard.
-The General Manager creates all users and sets their passwords (`bcryptjs` hashed).
+The General Manager creates all users and sets their passwords (`bcryptjs` hashed, `crypto.randomBytes` for initial random password).
 
 All non-GM users get a slug-style `userId` (e.g. `john-doe-a4f2`) generated by `lib/generateUserId.ts`.
 `CourseClass.classId` is generated by the same pattern via `lib/generateClassId.ts`.
@@ -215,6 +245,7 @@ Teacher pages:
 - **Class detail** (`/teacher/classes/[id]`) — tabs: students list, exams (score entry + finalize), reports (view student reports + write new ones)
 - **Attendance** (`/teacher/attendance`) — take/update student attendance per class per date, finalize class attendance
 - **Reports** (`/teacher/reports`) — Browse tab (own reports), Write Report tab, Actions tab (pending actionable)
+- **Messages** (`/teacher/messages`) — direct messages to branch manager/GM + general channel
 - **Student profile** (`/teacher/students/[id]`) — read-only profile for students enrolled in teacher's classes
 
 ### Staff and teacher payment generation
@@ -226,6 +257,8 @@ Payments for non-student payees (staff, managers, teachers) live in `app/manager
 **TeacherPayment** fields: `teacherId`, `branchId`, `month`, `year`, `paymentType` (snapshot at generation time), `grossAmount`, `deduction`, `netAmount`, `status`. `@@unique([teacherId, month, year])`.
 - `TeacherPaymentSection` — line-item per `ClassSection` for `PER_CLASS` teachers: `sessionsCount`, `rateSnapshot`, `amount`.
 - `TeacherPaymentClassMonth` — line-item per class-month for `REVENUE_PERCENTAGE` teachers: `totalFeesAmount`, `percentageSnapshot`. `@@unique([teacherId, courseClassId, monthNumber])`.
+- **Server-side recalculation**: `createOrUpdateTeacherPayment` recalculates line item `amount` fields server-side (never trusts client values).
+- **Deduction validation**: both `createOrUpdateStaffPayment` and `createOrUpdateTeacherPayment` reject negative deductions.
 
 Payment PDFs are generated via API routes (not server actions, because `@react-pdf/renderer` requires a response stream):
 - `GET /api/pdf/staff-payment/[id]` → `StaffPaymentPDF` component → PDF response
@@ -253,6 +286,9 @@ PDF components live in `components/pdf/` and use `@react-pdf/renderer`.
 
 ### `"use server"` constraint
 Files marked `"use server"` may **only** export async functions. Exporting plain objects, arrays, or constants from a `"use server"` file causes a runtime error. Move shared constants to a regular `lib/` file and import from there.
+
+### Branch-scoping security
+Manager server actions must always include `branchId` in `where` clauses when reading or mutating records. This prevents IDOR — a manager should never be able to access or modify records belonging to another branch.
 
 ### Design conventions
 - White background (`bg-white`) for all pages; `bg-gray-50` for page content area
