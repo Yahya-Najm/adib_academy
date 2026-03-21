@@ -117,12 +117,13 @@ export async function updateClass(
     sections: SectionInput[];
   }
 ) {
-  await getManagerInfo();
+  const { branchId } = await getManagerInfo();
   const existing = await prisma.courseClass.findUnique({
     where: { id },
     include: { courseTemplate: { select: { numSections: true } } },
   });
   if (!existing) throw new Error("Class not found");
+  if (existing.branchId !== branchId) throw new Error("Class not found");
   if (data.sections.length !== existing.courseTemplate.numSections)
     throw new Error(`This template requires exactly ${existing.courseTemplate.numSections} section(s)`);
   if (data.sections.some(s => !s.teacherId))
@@ -148,6 +149,8 @@ export async function updateClass(
 }
 
 export async function deleteClass(id: string) {
-  await getManagerInfo();
+  const { branchId } = await getManagerInfo();
+  const existing = await prisma.courseClass.findUnique({ where: { id } });
+  if (!existing || existing.branchId !== branchId) throw new Error("Class not found");
   return prisma.courseClass.delete({ where: { id } });
 }

@@ -36,13 +36,9 @@ function getGMConfigs(): GMConfig[] {
     });
   }
 
-  // Fallback for local dev if no env vars are set
   if (configs.length === 0) {
-    configs.push({
-      email: "gm@adibacademy.com",
-      name: "General Manager",
-      password: "admin123",
-    });
+    console.error("❌ No GM credentials found. Set GM1_EMAIL, GM1_NAME, GM1_PASSWORD environment variables.");
+    process.exit(1);
   }
 
   return configs;

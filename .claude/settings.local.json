@@ -27,7 +27,20 @@
       "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\api\\\\pdf\\\\teacher-payment\\\\[id]\")",
       "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\manager\\\\payments\\\\staff\\\\[id]\")",
       "Bash(mkdir -p \"E:\\\\adib\\\\adib_acadmey\\\\app\\\\manager\\\\payments\\\\teachers\\\\[id]\")",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(find /e/adib/adib_acadmey -type f -name .env*)",
+      "Bash(grep -r ^exports*{ /e/adib/adib_acadmey/app/*/actions/*.ts)",
+      "Bash(grep -r NEXT_PUBLIC /e/adib/adib_acadmey/. --include=*.ts --include=*.tsx --include=*.js)",
+      "Bash(find /e/adib/adib_acadmey/app -path *api* -name *.ts -o -path *api* -name *.tsx)",
+      "Bash(/tmp/security_check.txt:*)",
+      "Read(//tmp/**)",
+      "Bash(find /e/adib/adib_acadmey -type f -name *.ts ! -path */node_modules/* -exec grep -l \"query\\\\|where.*raw\\\\|sql\\\\|prisma.*$raw\" {})",
+      "Bash(grep -r \"\\\\.select\\\\|\\\\.include\" app/general-manager/actions/*.ts)",
+      "Bash(xargs head:*)",
+      "Bash(grep -r \"headers\\\\|CORS\\\\|X-\" /e/adib/adib_acadmey/app --include=*.ts)",
+      "Bash(grep -r \"eval\\\\|Function\\\\|dangerouslySetInnerHTML\\\\|innerHTML\" /e/adib/adib_acadmey/app --include=*.tsx --include=*.ts)",
+      "Bash(grep -r \"executeQuery\\\\|rawQuery\\\\|runQuery\\\\|$queryRaw\\\\|queryRaw\" /e/adib/adib_acadmey/app --include=*.ts)",
+      "Bash(npx next:*)"
     ]
   }
 }

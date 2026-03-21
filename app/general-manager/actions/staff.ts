@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { requireGM } from "./guard";
 import { generateUserId } from "@/lib/generateUserId";
 
@@ -25,7 +26,7 @@ export async function createStaff(
 ) {
   const session = await requireGM();
   if (!name.trim() || !staffType.trim()) throw new Error("Name and staff type are required");
-  const hashed = await bcrypt.hash(Math.random().toString(36) + Date.now(), 10);
+  const hashed = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
   const userId = await generateUserId(name);
   return prisma.user.create({
     data: {

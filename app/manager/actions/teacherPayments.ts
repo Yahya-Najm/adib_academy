@@ -279,6 +279,19 @@ export async function createOrUpdateTeacherPayment(
   });
   if (existing?.status === "FINALIZED") throw new Error("This payment is already finalized");
 
+  if (deduction < 0) throw new Error("Deduction cannot be negative");
+
+  // Server-side recalculation of line item amounts to prevent client tampering
+  if (teacher.paymentType !== "REVENUE_PERCENTAGE") {
+    for (const s of sectionSummaries) {
+      s.amount = s.sessionsCount * s.rateSnapshot;
+    }
+  } else {
+    for (const cm of eligibleClassMonths) {
+      cm.amount = cm.totalFeesAmount * (cm.percentageSnapshot / 100);
+    }
+  }
+
   const grossAmount = teacher.paymentType === "REVENUE_PERCENTAGE"
     ? eligibleClassMonths.reduce((sum, cm) => sum + cm.amount, 0)
     : sectionSummaries.reduce((sum, s) => sum + s.amount, 0);

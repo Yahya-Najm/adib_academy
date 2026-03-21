@@ -224,6 +224,8 @@ model User {
   staffPaymentsFinalized StaffPayment[] @relation("StaffPaymentFinalizer")
   teacherPayments   TeacherPayment[] @relation("UserTeacherPayments")
   teacherPaymentsFinalized TeacherPayment[] @relation("TeacherPaymentFinalizer")
+  sentMessages     Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
 }
 
 model Student {
@@ -550,6 +552,19 @@ model TeacherPaymentSection {
   sessionsCount    Int            // number of sessions this teacher was present for this section
   rateSnapshot     Float          // perClassRate or hourlyRate at time of payment
   amount           Float          // sessionsCount × rateSnapshot
+}
+
+/// In-app message — direct or general channel
+model Message {
+  id         String   @id @default(cuid())
+  senderId   String
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
+  receiverId String?  // null = general channel
+  receiver   User?    @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  channel    String   // "DIRECT" | "GENERAL"
+  content    String
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
 }
 
 /// Line item for REVENUE_PERCENTAGE teacher payments — one row per finalized class-month

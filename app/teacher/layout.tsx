@@ -5,6 +5,7 @@ const nav = [
   { label: "Classes", href: "/teacher/classes" },
   { label: "Attendance", href: "/teacher/attendance" },
   { label: "Reports", href: "/teacher/reports" },
+  { label: "Messages", href: "/teacher/messages" },
 ];
 
 export default function TeacherLayout({ children }: { children: React.ReactNode }) {

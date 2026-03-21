@@ -214,6 +214,7 @@ export async function createOrUpdateStaffPayment(
   });
   if (!user) throw new Error("Staff member not found");
   if (!user.monthlySalary) throw new Error("No salary configured for this staff member");
+  if (deduction < 0) throw new Error("Deduction cannot be negative");
 
   const now = new Date();
   const dueDate = getPaymentDueDate(user.createdAt, now);
